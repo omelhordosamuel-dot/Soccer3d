@@ -1,0 +1,9 @@
+{
+  "name": "futebol-naval-3d",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Prototipo web de futebol naval 3D com barcos e bolas de canhao.",
+  "scripts": {
+    "start": "node dev-server.js"
+  }
+}

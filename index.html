@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Futebol Naval 3D</title>
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+  <body>
+    <main class="game-shell">
+      <canvas id="game" aria-label="Arena 3D de futebol naval no oceano"></canvas>
+
+      <section class="hud" aria-label="Painel do jogo">
+        <div class="score" aria-label="Placar">
+          <span id="playerScore">0</span>
+          <span class="score-separator">:</span>
+          <span id="aiScore">0</span>
+        </div>
+        <div class="match-info">
+          <span id="clock">02:00</span>
+          <span id="status">Empurre a bola de canhao ate o navio-gol rival.</span>
+        </div>
+      </section>
+
+      <section class="menu-overlay" id="mainMenu" aria-label="Menu inicial">
+        <div class="menu-app">
+          <aside class="menu-sidebar" aria-label="Navegacao">
+            <div class="brand-block">
+              <span class="eyebrow">Futebol Naval 3D</span>
+              <h1>Canhao League</h1>
+            </div>
+
+            <div class="profile-strip">
+              <div>
+                <span>Moedas</span>
+                <strong id="coinAmount">0</strong>
+              </div>
+              <div>
+                <span>Navio ativo</span>
+                <strong id="activeSkinName">Classico Azul</strong>
+              </div>
+            </div>
+
+            <nav class="menu-tabs" role="tablist" aria-label="Menu do jogo">
+              <button id="playTabButton" class="active" type="button">Jogar</button>
+              <button id="shopTabButton" type="button">Loja</button>
+              <button id="skinsTabButton" type="button">Personagens</button>
+              <button id="craftingTabButton" type="button">Crafting</button>
+            </nav>
+          </aside>
+
+          <section class="menu-content" aria-label="Conteudo do menu">
+            <section class="menu-panel active" id="playPanel">
+              <div class="section-heading">
+                <span>Partida</span>
+                <h2>Entrar no oceano</h2>
+              </div>
+
+              <div class="play-grid">
+                <button id="playSoloButton" class="play-card" type="button">
+                  <span>Solo</span>
+                  <strong>Jogar sozinho</strong>
+                </button>
+                <button id="playWagerButton" class="play-card" type="button">
+                  <span>Aposta</span>
+                  <strong>Aposta solo - 25</strong>
+                </button>
+              </div>
+
+              <div class="settings-panel" aria-label="Configuracoes do jogo">
+                <label for="cameraZoom">
+                  <span>Zoom da camera</span>
+                  <strong id="cameraZoomValue">Normal</strong>
+                </label>
+                <input id="cameraZoom" type="range" min="0" max="2" step="1" value="0" />
+              </div>
+            </section>
+
+            <section class="menu-panel" id="shopPanel" hidden>
+              <div class="section-heading">
+                <span>Loja</span>
+                <h2>Caixa e testes</h2>
+              </div>
+
+              <div class="reward-box">
+                <div>
+                  <strong>Caixa Pirata</strong>
+                  <span>Comum: Luffy 65% | Incomum: Zoro 27% | Raro: Law 8%</span>
+                </div>
+                <button id="openBoxButton" type="button">Abrir caixa - 80</button>
+                <span id="boxResult">Ganhe moedas jogando ou apostando para abrir caixas.</span>
+              </div>
+
+              <div class="shop-header">
+                <h2>Painel secreto</h2>
+                <button id="adminOpenButton" class="ghost-button" type="button">Admin</button>
+              </div>
+
+              <div class="admin-panel" id="adminPanel" hidden>
+                <label>
+                  Senha secreta
+                  <input id="adminPassword" type="password" inputmode="numeric" autocomplete="off" />
+                </label>
+                <label>
+                  Quantidade para dar
+                  <input id="adminGiveAmount" type="number" min="1" max="99" value="3" />
+                </label>
+                <div class="admin-actions">
+                  <button id="adminUnlockAllButton" type="button">Liberar todos</button>
+                  <button id="adminCoinsButton" type="button">+1000 moedas</button>
+                  <button id="adminResetCharactersButton" type="button">Zerar personagens</button>
+                </div>
+                <div class="admin-skins" id="adminSkinButtons"></div>
+                <span id="adminStatus"></span>
+              </div>
+            </section>
+
+            <section class="menu-panel" id="skinsPanel" hidden>
+              <div class="section-heading">
+                <span>Personagens / navios</span>
+                <h2>Colecao</h2>
+              </div>
+              <div class="shop-grid" id="shopGrid"></div>
+            </section>
+
+            <section class="menu-panel" id="craftingPanel" hidden>
+              <div class="section-heading">
+                <span>Crafting</span>
+                <h2>Combinar pers<span id="forbiddenCraftTrigger" class="secret-letter" role="button" tabindex="0" aria-label="Abrir crafts proibidos">o</span>nagens</h2>
+              </div>
+              <div class="craft-grid" id="craftGrid"></div>
+            </section>
+
+            <section class="menu-panel" id="forbiddenPanel" hidden>
+              <div class="section-heading forbidden-heading">
+                <span>Crafting</span>
+                <h2>Crafts proibidos</h2>
+                <button id="backToCraftingButton" class="ghost-button" type="button">Voltar</button>
+              </div>
+              <div class="forbidden-layout">
+                <div class="crafting-table" aria-label="Mesa de craft proibido">
+                  <div class="craft-slots" id="forbiddenSlots"></div>
+                  <div class="craft-output">
+                    <span>?</span>
+                  </div>
+                </div>
+                <div class="mini-inventory" id="forbiddenInventory"></div>
+              </div>
+            </section>
+          </section>
+
+          <aside class="preview-panel" aria-label="Preview do navio">
+            <div class="preview-top">
+              <div>
+                <span>Vitrine 3D</span>
+                <strong id="previewSkinName">Classico Azul</strong>
+              </div>
+              <button id="previewAbilityButton" class="icon-button" type="button" title="Testar habilidade">E</button>
+              <button id="previewAltAbilityButton" class="icon-button" type="button" title="Testar corte Wano">X</button>
+            </div>
+            <canvas id="previewCanvas" aria-label="Modelo 3D do navio selecionado"></canvas>
+            <label class="preview-zoom" for="shipPreviewZoom">
+              <span>Zoom do modelo</span>
+              <input id="shipPreviewZoom" type="range" min="0" max="100" value="20" />
+            </label>
+          </aside>
+        </div>
+      </section>
+
+      <aside class="controls" aria-label="Controles">
+        <kbd>W</kbd><kbd>S</kbd>
+        <span>acelerar</span>
+        <kbd>A</kbd><kbd>D</kbd>
+        <span>virar</span>
+        <kbd>Espaco</kbd>
+        <span>rajada</span>
+        <kbd>E</kbd>
+        <span>habilidade</span>
+        <kbd id="wanoCutKey">X</kbd>
+        <span id="wanoCutLabel">corte Wano</span>
+        <kbd>R</kbd>
+        <span>reiniciar</span>
+      </aside>
+
+      <button class="reset-button" id="resetButton" type="button" aria-label="Reiniciar partida">
+        Reiniciar
+      </button>
+      <button class="menu-button" id="menuButton" type="button" aria-label="Voltar ao menu">
+        Menu
+      </button>
+    </main>
+
+    <script type="module" src="./src/game.js"></script>
+  </body>
+</html>
