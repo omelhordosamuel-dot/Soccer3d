@@ -64,7 +64,8 @@ const previewAltAbilityButton = document.querySelector("#previewAltAbilityButton
 const ARENA = { width: 58, depth: 82, goalWidth: 18, goalDepth: 7 };
 const PROGRESS_KEY = "futebolNavalProgress.v1";
 const BOX_COST = 80;
-const SECRET_ITEM_CHANCE = 0.1;
+const SECRET_ITEM_CHANCE = 0.01;
+const KID_REWARD_CHANCE = 0.02;
 const SOLO_MATCH_SECONDS = 90;
 const ONLINE_MATCH_SECONDS = 120;
 const AI_DIFFICULTIES = {
@@ -179,6 +180,17 @@ const SKINS = {
     roomTeleports: 2,
     roomClearsAfterTeleport: false,
     shambles: true
+  },
+  kid: {
+    name: "Eustass Kid - Punk Laser",
+    rarity: "mythic",
+    rarityLabel: "Mitico 2%",
+    duplicateCoins: 180,
+    ability: "Arma magnetica",
+    description: "Atrai metal para formar uma arma gigante e dispara um laser roxo devastador.",
+    preview: "./src/assets/skins/kid-paint.png",
+    portrait: "./personagens/Kid.jpeg",
+    type: "magnetLaser"
   }
 };
 
@@ -314,6 +326,10 @@ const materials = {
   swordGuard: new THREE.MeshStandardMaterial({ color: 0xc89f42, roughness: 0.36, metalness: 0.45 }),
   slash: new THREE.MeshStandardMaterial({ color: 0x73ff8f, roughness: 0.18, emissive: 0x1b7f35, transparent: true, opacity: 0.72 }),
   lawSlash: new THREE.MeshStandardMaterial({ color: 0xf7fbff, roughness: 0.16, emissive: 0xb8d7ff, transparent: true, opacity: 0.76 }),
+  kidMetal: new THREE.MeshStandardMaterial({ color: 0x782020, roughness: 0.34, metalness: 0.88, emissive: 0x1b0308 }),
+  kidDarkMetal: new THREE.MeshStandardMaterial({ color: 0x201821, roughness: 0.28, metalness: 0.92, emissive: 0x16001d }),
+  kidLaser: new THREE.MeshStandardMaterial({ color: 0xc75bff, roughness: 0.1, emissive: 0x8a19ff, transparent: true, opacity: 0.74 }),
+  kidLightning: new THREE.MeshStandardMaterial({ color: 0xf4b4ff, roughness: 0.08, emissive: 0xaa28ff, transparent: true, opacity: 0.86 }),
   dome: new THREE.MeshStandardMaterial({
     color: 0xa9b2bd,
     roughness: 0.18,
@@ -1276,7 +1292,12 @@ function openRewardBox() {
 }
 
 function rollRewardBox() {
-  if (Math.random() < SECRET_ITEM_CHANCE) {
+  const specialRoll = Math.random();
+  if (specialRoll < KID_REWARD_CHANCE) {
+    return { type: "skin", skinId: "kid" };
+  }
+
+  if (specialRoll < KID_REWARD_CHANCE + SECRET_ITEM_CHANCE) {
     return { type: "item", itemId: "sahurEssence" };
   }
 
@@ -1468,6 +1489,12 @@ function createSkinMaterials() {
       trim: new THREE.MeshStandardMaterial({ color: 0xd7fff7, roughness: 0.28, metalness: 0.28, emissive: 0x123c3c }),
       sail: makeMapped(SKINS.lawSahur.preview, 0xe8ffff),
       portrait: portraitMaterial(SKINS.lawSahur.portrait)
+    },
+    kid: {
+      hull: makeMapped(SKINS.kid.preview, 0xffd7d7),
+      trim: new THREE.MeshStandardMaterial({ color: 0x9d1515, roughness: 0.26, metalness: 0.62, emissive: 0x270006 }),
+      sail: makeMapped(SKINS.kid.preview, 0xffd7d7),
+      portrait: portraitMaterial(SKINS.kid.portrait)
     }
   };
 }
@@ -1578,6 +1605,7 @@ function useAbility() {
   if (skin.type === "arm") spawnStretchArm();
   if (skin.type === "slash") spawnSwordSlash();
   if (skin.type === "room") spawnRoomDome();
+  if (skin.type === "magnetLaser") spawnKidMagnetLaser();
 }
 
 function useRoomCut() {
@@ -2107,6 +2135,118 @@ function createLawSwordModel() {
   return sword;
 }
 
+function spawnKidMagnetLaser() {
+  clearAbility();
+  const boat = getAbilityBoat();
+  const forward = getForward(boat);
+  const group = new THREE.Group();
+  const weapon = new THREE.Group();
+  const pieces = [];
+  const lightning = [];
+  const shockwaves = [];
+
+  weapon.visible = false;
+  weapon.scale.setScalar(0.2);
+
+  const mainBarrel = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.82, 8.4, 22), materials.kidDarkMetal);
+  mainBarrel.position.z = 5.6;
+  mainBarrel.rotation.x = Math.PI / 2;
+  mainBarrel.castShadow = true;
+  weapon.add(mainBarrel);
+
+  const outerBarrel = new THREE.Mesh(new THREE.CylinderGeometry(0.92, 1.12, 3.0, 22, 1, true), materials.kidMetal);
+  outerBarrel.position.z = 8.1;
+  outerBarrel.rotation.x = Math.PI / 2;
+  outerBarrel.castShadow = true;
+  weapon.add(outerBarrel);
+
+  for (const z of [2.4, 4.3, 6.2, 8.7]) {
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.95, 0.12, 10, 26), materials.kidMetal);
+    ring.position.z = z;
+    ring.rotation.x = Math.PI / 2;
+    ring.castShadow = true;
+    weapon.add(ring);
+  }
+
+  for (let i = 0; i < 6; i += 1) {
+    const angle = (i / 6) * Math.PI * 2;
+    const claw = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.5, 3.8), i % 2 ? materials.kidMetal : materials.kidDarkMetal);
+    claw.position.set(Math.cos(angle) * 0.82, Math.sin(angle) * 0.82, 5.5);
+    claw.rotation.z = angle;
+    claw.rotation.x = 0.22;
+    claw.castShadow = true;
+    weapon.add(claw);
+  }
+
+  const laser = new THREE.Mesh(new THREE.CylinderGeometry(0.46, 0.9, 32, 24), materials.kidLaser);
+  laser.position.z = 24;
+  laser.rotation.x = Math.PI / 2;
+  laser.visible = false;
+  weapon.add(laser);
+
+  for (let i = 0; i < 32; i += 1) {
+    const shape = i % 3 === 0
+      ? new THREE.CylinderGeometry(0.12, 0.18, 1.3 + Math.random() * 1.3, 8)
+      : new THREE.BoxGeometry(0.5 + Math.random() * 0.9, 0.22 + Math.random() * 0.42, 0.7 + Math.random() * 1.4);
+    const piece = new THREE.Mesh(shape, i % 2 ? materials.kidMetal : materials.kidDarkMetal);
+    const start = new THREE.Vector3((Math.random() - 0.5) * 36, 4 + Math.random() * 12, -12 + Math.random() * 24);
+    const target = new THREE.Vector3((Math.random() - 0.5) * 2.5, 0.3 + Math.random() * 2.3, 1.2 + Math.random() * 7.4);
+    piece.position.copy(start);
+    piece.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+    piece.castShadow = true;
+    group.add(piece);
+    pieces.push({
+      mesh: piece,
+      start,
+      target,
+      spin: new THREE.Vector3((Math.random() - 0.5) * 6, (Math.random() - 0.5) * 7, (Math.random() - 0.5) * 6)
+    });
+  }
+
+  for (let i = 0; i < 12; i += 1) {
+    const bolt = createEnergyBlade(2.4 + Math.random() * 4.2, 0.12, materials.kidLightning);
+    bolt.visible = false;
+    bolt.position.z = 8 + Math.random() * 18;
+    bolt.position.x = (Math.random() - 0.5) * 4.2;
+    bolt.position.y = (Math.random() - 0.5) * 3.2;
+    bolt.rotation.z = Math.random() * Math.PI;
+    lightning.push(bolt);
+    weapon.add(bolt);
+  }
+
+  for (let i = 0; i < 4; i += 1) {
+    const wave = new THREE.Mesh(new THREE.TorusGeometry(1.3 + i * 0.55, 0.08, 8, 42), materials.kidLightning);
+    wave.position.z = 9.8 + i * 2.3;
+    wave.rotation.x = Math.PI / 2;
+    wave.visible = false;
+    shockwaves.push(wave);
+    weapon.add(wave);
+  }
+
+  weapon.position.set(0, 2.1, 2.4);
+  group.add(weapon);
+  group.position.copy(boat.position);
+  group.rotation.y = boat.userData.heading;
+  world.add(group);
+
+  activeAbility = {
+    type: "kidLaser",
+    group,
+    weapon,
+    laser,
+    pieces,
+    lightning,
+    shockwaves,
+    forward,
+    origin: boat.position.clone(),
+    life: 5,
+    maxLife: 5,
+    hit: false
+  };
+  setAbilityCooldown(11);
+  state.message = "Pecas metalicas estao sendo puxadas pelo magnetismo.";
+}
+
 function updateAbility(dt) {
   if (!activeAbility) return;
 
@@ -2141,7 +2281,87 @@ function updateAbility(dt) {
     updateRoomCuts(dt);
   }
 
+  if (activeAbility.type === "kidLaser") {
+    updateKidMagnetLaser(dt);
+  }
+
   if (activeAbility.life <= 0) clearAbility();
+}
+
+function updateKidMagnetLaser(dt) {
+  const ability = activeAbility;
+  const age = ability.maxLife - ability.life;
+  const gatherT = THREE.MathUtils.clamp(age / 2.15, 0, 1);
+  const buildT = THREE.MathUtils.clamp((age - 1.45) / 1.35, 0, 1);
+  const fireT = THREE.MathUtils.clamp((age - 2.65) / 2.1, 0, 1);
+  const easedGather = smoothStep(gatherT);
+  const easedBuild = smoothStep(buildT);
+
+  ability.group.position.y = 0.65 + Math.sin(age * 5) * 0.08;
+
+  for (const piece of ability.pieces) {
+    piece.mesh.position.lerpVectors(piece.start, piece.target, easedGather);
+    piece.mesh.position.y += Math.sin(age * 5 + piece.target.z) * (1 - easedGather) * 1.2;
+    piece.mesh.rotation.x += piece.spin.x * dt * (1.2 - easedGather * 0.45);
+    piece.mesh.rotation.y += piece.spin.y * dt * (1.2 - easedGather * 0.45);
+    piece.mesh.rotation.z += piece.spin.z * dt * (1.2 - easedGather * 0.45);
+  }
+
+  ability.weapon.visible = buildT > 0.05;
+  ability.weapon.scale.setScalar(0.2 + easedBuild * 0.8 + Math.sin(age * 14) * fireT * 0.04);
+  ability.weapon.rotation.z = Math.sin(age * 3.3) * 0.05;
+
+  ability.laser.visible = fireT > 0.08;
+  ability.laser.scale.set(1 + Math.sin(age * 22) * 0.1, 1 + Math.sin(age * 17) * 0.12, THREE.MathUtils.clamp(fireT * 1.4, 0.05, 1.4));
+  ability.laser.material.opacity = 0.45 + Math.sin(age * 28) * 0.18;
+
+  for (let i = 0; i < ability.lightning.length; i += 1) {
+    const bolt = ability.lightning[i];
+    bolt.visible = fireT > 0.04 || gatherT > 0.28;
+    bolt.position.x = Math.sin(age * (5 + i * 0.2) + i) * (1.2 + fireT * 1.8);
+    bolt.position.y = Math.cos(age * (4.4 + i * 0.17) + i * 0.8) * (0.8 + fireT * 1.2);
+    bolt.rotation.z += dt * (4 + i * 0.25);
+    bolt.scale.setScalar(0.55 + fireT * 1.15 + Math.sin(age * 12 + i) * 0.08);
+  }
+
+  for (let i = 0; i < ability.shockwaves.length; i += 1) {
+    const wave = ability.shockwaves[i];
+    wave.visible = fireT > 0.12;
+    const pulse = (fireT * 4 + i * 0.42) % 1;
+    wave.scale.setScalar(0.45 + pulse * 2.4);
+    wave.material.opacity = 0.65 * (1 - pulse);
+  }
+
+  if (fireT > 0.18) {
+    const start = ability.group.position.clone().addScaledVector(ability.forward, 5.5);
+    start.y = 1.15;
+    const end = ability.group.position.clone().addScaledVector(ability.forward, 38);
+    end.y = 1.15;
+    if (!ability.hit && distancePointToSegment(cannonball.position, start, end) < 5.5) {
+      cannonball.userData.velocity.addScaledVector(ability.forward, 42);
+      cannonball.userData.velocity.y = 0;
+      splash(cannonball.position, materials.kidLightning);
+      ability.hit = true;
+      state.message = "Punk Laser acertou a bola de canhao.";
+    }
+  }
+
+  if (fireT > 0.72 && Math.random() < 0.35) {
+    const blast = ability.group.position.clone().addScaledVector(ability.forward, 18 + Math.random() * 12);
+    blast.y = 0.3;
+    splash(blast, materials.kidLightning);
+  }
+
+  const focus = ability.group.position.clone().addScaledVector(ability.forward, 8 + fireT * 8);
+  camera.position.lerp(
+    new THREE.Vector3(
+      ability.group.position.x - ability.forward.x * (15 - fireT * 4) + Math.sin(age * 2) * 4,
+      11 + Math.sin(age * Math.PI) * 4,
+      ability.group.position.z - ability.forward.z * (15 - fireT * 4) + 12
+    ),
+    0.08
+  );
+  camera.lookAt(focus.x, 2.5 + fireT * 1.4, focus.z);
 }
 
 function clearAbility() {
@@ -2293,7 +2513,7 @@ function update() {
   }
   updateAbility(dt);
   updateWake(dt);
-  if (!inCutscene) updateCamera(dt);
+  if (!inCutscene && activeAbility?.type !== "kidLaser") updateCamera(dt);
   updateHud();
   renderer.render(scene, camera);
   updatePreview(dt, elapsed);
