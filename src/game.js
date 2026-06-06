@@ -29,6 +29,8 @@ const forbiddenSlots = document.querySelector("#forbiddenSlots");
 const forbiddenInventory = document.querySelector("#forbiddenInventory");
 const wanoCutKey = document.querySelector("#wanoCutKey");
 const wanoCutLabel = document.querySelector("#wanoCutLabel");
+const shamblesKey = document.querySelector("#shamblesKey");
+const shamblesLabel = document.querySelector("#shamblesLabel");
 const shopGrid = document.querySelector("#shopGrid");
 const craftGrid = document.querySelector("#craftGrid");
 const coinAmountEl = document.querySelector("#coinAmount");
@@ -124,7 +126,7 @@ const SKINS = {
     rarityLabel: "Craft+",
     ability: "Room + corte rapido",
     description: "Room grande, 2 teleportes e 2 cortes brancos de espada enquanto ele esta ativo.",
-    preview: "./src/assets/skins/law-wano-paint.png",
+    preview: "./src/assets/skins/law-sahur-paint.png",
     portrait: "./personagens/Law wano.jpg",
     type: "room",
     domeRadius: 20,
@@ -396,6 +398,8 @@ adminUnlockAllButton.addEventListener("click", () => runAdminAction(() => {
       progress.inventory[skinId] = Math.max(progress.inventory[skinId] || 0, 3);
     }
   }
+  progress.items = normalizeSecretItems(progress.items);
+  progress.items.sahurEssence = Math.max(progress.items.sahurEssence || 0, 3);
   saveProgress();
   renderShop();
   renderCrafting();
@@ -410,6 +414,7 @@ adminCoinsButton.addEventListener("click", () => runAdminAction(() => {
 adminResetCharactersButton.addEventListener("click", () => runAdminAction(() => {
   progress.unlocked = ["classic"];
   progress.inventory = normalizeInventory({}, progress.unlocked);
+  progress.items = normalizeSecretItems({});
   progress.selectedSkin = "classic";
   progress.discovered ||= {};
   clearAbility();
@@ -451,6 +456,7 @@ window.addEventListener("keydown", (event) => {
   if (event.code === "KeyR") resetMatch();
   if (event.code === "KeyE") useAbility();
   if (event.code === "KeyX") useRoomCut();
+  if (event.code === "KeyZ") useShambles();
 });
 window.addEventListener("keyup", (event) => keys.delete(event.code));
 window.addEventListener("resize", resize);
@@ -549,6 +555,12 @@ function addCharacterCopies(skinId, amount) {
   if (["law", "lawDressrosa", "lawWano"].includes(skinId)) {
     progress.discovered.lawCrafts = true;
   }
+}
+
+function addSecretItem(itemId, amount) {
+  if (!SECRET_ITEMS[itemId]) return;
+  progress.items ||= {};
+  progress.items[itemId] = (progress.items[itemId] || 0) + amount;
 }
 
 function renderShop() {
@@ -704,7 +716,7 @@ function selectPreviewSkin(skinId) {
   if (!SKINS[skinId]) return;
   preview.selectedSkin = skinId;
   previewSkinName.textContent = SKINS[skinId].name;
-  previewAltAbilityButton.hidden = skinId !== "lawWano";
+  previewAltAbilityButton.hidden = !SKINS[skinId].roomCuts;
   if (preview.boat) applySkinToBoat(preview.boat, skinId);
 }
 
@@ -889,9 +901,12 @@ function updatePreview(dt, elapsed) {
 }
 
 function updateContextControls() {
-  const hasWanoCut = progress.selectedSkin === "lawWano";
+  const hasWanoCut = Boolean(SKINS[progress.selectedSkin]?.roomCuts);
+  const hasShambles = ownsSkin("lawSahur");
   wanoCutKey.hidden = !hasWanoCut;
   wanoCutLabel.hidden = !hasWanoCut;
+  shamblesKey.hidden = !hasShambles;
+  shamblesLabel.hidden = !hasShambles;
 }
 
 function setMenuTab(tab) {
@@ -987,9 +1002,29 @@ function renderForbiddenCrafts() {
   forbiddenInventory.innerHTML = "";
 
   for (let i = 0; i < 9; i += 1) {
+    const material = forbiddenCraft.slots[i];
     const slot = document.createElement("div");
     slot.className = "craft-slot";
-    slot.textContent = "+";
+    slot.dataset.slotIndex = i;
+    if (material) {
+      slot.classList.add("filled");
+      const data = getForbiddenMaterialData(material);
+      slot.innerHTML = `<img src="${data.image}" alt=""><span>${data.name}</span>`;
+    } else {
+      slot.textContent = "+";
+    }
+    slot.addEventListener("dragover", (event) => event.preventDefault());
+    slot.addEventListener("drop", (event) => {
+      event.preventDefault();
+      const payload = parseForbiddenPayload(event.dataTransfer.getData("text/plain"));
+      if (!payload || !canUseForbiddenMaterial(payload)) return;
+      forbiddenCraft.slots[i] = payload;
+      if (!tryForbiddenCraft()) renderForbiddenCrafts();
+    });
+    slot.addEventListener("click", () => {
+      forbiddenCraft.slots[i] = null;
+      renderForbiddenCrafts();
+    });
     forbiddenSlots.append(slot);
   }
 
@@ -1000,14 +1035,15 @@ function renderForbiddenCrafts() {
     if (amount <= 0) continue;
 
     itemCount += 1;
-    const card = document.createElement("div");
-    card.className = "mini-inventory-card";
-    card.innerHTML = `
-      <img src="${skin.portrait || skin.preview}" alt="">
-      <span>${skin.name}</span>
-      <strong>x${amount}</strong>
-    `;
-    forbiddenInventory.append(card);
+    forbiddenInventory.append(createForbiddenMaterialCard({ type: "skin", id: skinId }, amount));
+  }
+
+  for (const [itemId, item] of Object.entries(SECRET_ITEMS)) {
+    const amount = progress.items?.[itemId] || 0;
+    if (amount <= 0) continue;
+
+    itemCount += 1;
+    forbiddenInventory.append(createForbiddenMaterialCard({ type: "item", id: itemId }, amount));
   }
 
   if (itemCount === 0) {
@@ -1016,6 +1052,72 @@ function renderForbiddenCrafts() {
     empty.textContent = "Sem personagens no inventario.";
     forbiddenInventory.append(empty);
   }
+}
+
+function createForbiddenMaterialCard(material, amount) {
+  const data = getForbiddenMaterialData(material);
+  const card = document.createElement("div");
+  card.className = "mini-inventory-card";
+  card.draggable = true;
+  card.innerHTML = `
+    <img src="${data.image}" alt="">
+    <span>${data.name}</span>
+    <strong>x${amount}</strong>
+  `;
+  card.addEventListener("dragstart", (event) => {
+    event.dataTransfer.setData("text/plain", JSON.stringify(material));
+  });
+  return card;
+}
+
+function getForbiddenMaterialData(material) {
+  if (material.type === "item") {
+    const item = SECRET_ITEMS[material.id];
+    return { name: item.name, image: item.portrait };
+  }
+
+  const skin = SKINS[material.id];
+  return { name: skin.name, image: skin.portrait || skin.preview };
+}
+
+function parseForbiddenPayload(rawPayload) {
+  try {
+    const payload = JSON.parse(rawPayload);
+    if ((payload.type === "skin" && SKINS[payload.id]) || (payload.type === "item" && SECRET_ITEMS[payload.id])) {
+      return payload;
+    }
+  } catch (error) {
+    return null;
+  }
+  return null;
+}
+
+function canUseForbiddenMaterial(material) {
+  const used = forbiddenCraft.slots.filter((slot) => slot?.type === material.type && slot.id === material.id).length;
+  const owned = material.type === "skin"
+    ? progress.inventory[material.id] || 0
+    : progress.items?.[material.id] || 0;
+  return used < owned;
+}
+
+function tryForbiddenCraft() {
+  const hasLawWano = forbiddenCraft.slots.some((slot) => slot?.type === "skin" && slot.id === "lawWano");
+  const hasSahurEssence = forbiddenCraft.slots.some((slot) => slot?.type === "item" && slot.id === "sahurEssence");
+  if (!hasLawWano || !hasSahurEssence) return false;
+
+  progress.inventory.lawWano -= 1;
+  progress.items.sahurEssence -= 1;
+  addCharacterCopies("lawSahur", 1);
+  progress.selectedSkin = "lawSahur";
+  forbiddenCraft.slots = Array(9).fill(null);
+  saveProgress();
+  applySkinToBoat(player, "lawSahur");
+  selectPreviewSkin("lawSahur");
+  boxResult.textContent = `${SKINS.lawSahur.name} criado.`;
+  renderShop();
+  renderCrafting();
+  renderForbiddenCrafts();
+  return true;
 }
 
 function canCraftRecipe(recipe) {
@@ -1048,7 +1150,18 @@ function openRewardBox() {
   }
 
   progress.coins -= BOX_COST;
-  const skinId = rollRewardSkin();
+  const reward = rollRewardBox();
+  if (reward.type === "item") {
+    const item = SECRET_ITEMS[reward.itemId];
+    addSecretItem(reward.itemId, 1);
+    boxResult.textContent = `Voce recebeu ${item.name}.`;
+    saveProgress();
+    renderShop();
+    renderForbiddenCrafts();
+    return;
+  }
+
+  const skinId = reward.skinId;
   const skin = SKINS[skinId];
   addCharacterCopies(skinId, 1);
   progress.selectedSkin = skinId;
@@ -1061,16 +1174,20 @@ function openRewardBox() {
   renderForbiddenCrafts();
 }
 
-function rollRewardSkin() {
+function rollRewardBox() {
+  if (Math.random() < SECRET_ITEM_CHANCE) {
+    return { type: "item", itemId: "sahurEssence" };
+  }
+
   const roll = Math.random();
   let total = 0;
 
   for (const reward of BOX_REWARDS) {
     total += reward.chance;
-    if (roll <= total) return reward.skinId;
+    if (roll <= total) return { type: "skin", skinId: reward.skinId };
   }
 
-  return BOX_REWARDS[BOX_REWARDS.length - 1].skinId;
+  return { type: "skin", skinId: BOX_REWARDS[BOX_REWARDS.length - 1].skinId };
 }
 
 function runAdminAction(action) {
@@ -1192,6 +1309,12 @@ function createSkinMaterials() {
       trim: new THREE.MeshStandardMaterial({ color: 0xf4e6b0, roughness: 0.34, metalness: 0.22 }),
       sail: makeMapped(SKINS.lawWano.preview, 0xffffff),
       portrait: portraitMaterial(SKINS.lawWano.portrait)
+    },
+    lawSahur: {
+      hull: makeMapped(SKINS.lawSahur.preview, 0xe8ffff),
+      trim: new THREE.MeshStandardMaterial({ color: 0xd7fff7, roughness: 0.28, metalness: 0.28, emissive: 0x123c3c }),
+      sail: makeMapped(SKINS.lawSahur.preview, 0xe8ffff),
+      portrait: portraitMaterial(SKINS.lawSahur.portrait)
     }
   };
 }
@@ -1233,11 +1356,186 @@ function useAbility() {
 function useRoomCut() {
   if (!state.isPlaying || !activeAbility || activeAbility.type !== "room") return;
   const skin = SKINS[progress.selectedSkin];
-  if (progress.selectedSkin !== "lawWano" || !skin?.roomCuts || activeAbility.cutsRemaining <= 0) return;
+  if (!skin?.roomCuts || activeAbility.cutsRemaining <= 0) return;
 
   spawnLawRoomCut();
   activeAbility.cutsRemaining -= 1;
   state.message = `Corte de espada Wano usado. Restam ${activeAbility.cutsRemaining}.`;
+}
+
+function useShambles() {
+  const skin = SKINS[progress.selectedSkin];
+  if (!state.isPlaying || !skin?.shambles || !activeAbility || activeAbility.type !== "room" || shamblesCutscene) return;
+
+  const now = performance.now();
+  const doublePress = now - lastShamblesKeyTime < 450;
+  lastShamblesKeyTime = now;
+
+  shamblesTargeting = {
+    mode: doublePress ? "pair" : "player",
+    selected: []
+  };
+  state.message = doublePress
+    ? "Shambles preparado."
+    : "Shambles preparado.";
+}
+
+function chooseShamblesTarget(event) {
+  if (!shamblesTargeting || !activeAbility || activeAbility.type !== "room") return false;
+
+  const target = pickShamblesObject(event);
+  if (!target) {
+    state.message = "Shambles precisa de um alvo dentro do Room.";
+    return true;
+  }
+
+  if (shamblesTargeting.mode === "player") {
+    startShamblesCutscene(getShamblesObject("player"), target);
+    shamblesTargeting = null;
+    return true;
+  }
+
+  if (shamblesTargeting.selected.length === 0) {
+    shamblesTargeting.selected.push(target);
+    state.message = "Primeiro alvo escolhido.";
+    return true;
+  }
+
+  const first = shamblesTargeting.selected[0];
+  if (first.id === target.id) {
+    state.message = "Escolha outro alvo.";
+    return true;
+  }
+
+  startShamblesCutscene(first, target);
+  shamblesTargeting = null;
+  return true;
+}
+
+function pickShamblesObject(event) {
+  const rect = canvas.getBoundingClientRect();
+  pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(pointer, camera);
+
+  const candidates = [getShamblesObject("ball"), getShamblesObject("enemy")];
+  const hits = raycaster.intersectObjects(candidates.map((candidate) => candidate.object), true);
+  for (const hit of hits) {
+    const match = candidates.find((candidate) => candidate.object === hit.object || candidate.object.children.includes(hit.object));
+    if (match && roomContains(match.object.position)) return match;
+  }
+
+  return null;
+}
+
+function getShamblesObject(id) {
+  if (id === "player") return { id, object: player };
+  if (id === "enemy") return { id, object: ai };
+  return { id: "ball", object: cannonball };
+}
+
+function startShamblesCutscene(a, b) {
+  const startA = a.object.position.clone();
+  const startB = b.object.position.clone();
+  const mid = startA.clone().lerp(startB, 0.5);
+  const effects = createShamblesEffects(startA, startB);
+  world.add(effects.group);
+
+  shamblesCutscene = {
+    a,
+    b,
+    startA,
+    startB,
+    mid,
+    effects,
+    elapsed: 0,
+    duration: 5
+  };
+  state.message = "Shambles.";
+}
+
+function createShamblesEffects(startA, startB) {
+  const group = new THREE.Group();
+  const ringMaterial = new THREE.MeshBasicMaterial({
+    color: 0x9ffcff,
+    transparent: true,
+    opacity: 0.78,
+    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide,
+    depthWrite: false
+  });
+  const beamMaterial = new THREE.MeshBasicMaterial({
+    color: 0xff7bff,
+    transparent: true,
+    opacity: 0.6,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false
+  });
+
+  const ringA = new THREE.Mesh(new THREE.TorusGeometry(1.9, 0.08, 10, 64), ringMaterial);
+  const ringB = new THREE.Mesh(new THREE.TorusGeometry(1.9, 0.08, 10, 64), ringMaterial.clone());
+  ringA.position.copy(startA);
+  ringB.position.copy(startB);
+  ringA.position.y = 1.2;
+  ringB.position.y = 1.2;
+  ringA.rotation.x = Math.PI / 2;
+  ringB.rotation.x = Math.PI / 2;
+
+  const beam = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.28, startA.distanceTo(startB)), beamMaterial);
+  const mid = startA.clone().lerp(startB, 0.5);
+  beam.position.copy(mid);
+  beam.position.y = 1.35;
+  beam.lookAt(startB.x, 1.35, startB.z);
+
+  group.add(ringA, ringB, beam);
+  return { group, ringA, ringB, beam };
+}
+
+function updateShamblesCutscene(dt, elapsed) {
+  if (!shamblesCutscene) return false;
+
+  const cutscene = shamblesCutscene;
+  cutscene.elapsed += dt;
+  const t = THREE.MathUtils.clamp(cutscene.elapsed / cutscene.duration, 0, 1);
+  const swapT = smoothStep(THREE.MathUtils.clamp((t - 0.18) / 0.64, 0, 1));
+  const arc = Math.sin(swapT * Math.PI) * 2.4;
+
+  cutscene.a.object.position.lerpVectors(cutscene.startA, cutscene.startB, swapT);
+  cutscene.b.object.position.lerpVectors(cutscene.startB, cutscene.startA, swapT);
+  cutscene.a.object.position.y = getShamblesBaseY(cutscene.a.id) + arc;
+  cutscene.b.object.position.y = getShamblesBaseY(cutscene.b.id) + arc;
+
+  cutscene.effects.ringA.position.copy(cutscene.a.object.position);
+  cutscene.effects.ringB.position.copy(cutscene.b.object.position);
+  cutscene.effects.ringA.position.y += 0.55;
+  cutscene.effects.ringB.position.y += 0.55;
+  cutscene.effects.ringA.rotation.z += dt * 4.5;
+  cutscene.effects.ringB.rotation.z -= dt * 4.8;
+  cutscene.effects.group.scale.setScalar(1 + Math.sin(t * Math.PI) * 0.28);
+  cutscene.effects.beam.material.opacity = 0.35 + Math.sin(elapsed * 18) * 0.18;
+
+  camera.position.lerp(new THREE.Vector3(cutscene.mid.x + Math.sin(t * Math.PI * 2) * 10, 18 - Math.sin(t * Math.PI) * 4, cutscene.mid.z + 24), 0.09);
+  camera.lookAt(cutscene.mid.x, 1.8 + Math.sin(t * Math.PI) * 1.2, cutscene.mid.z);
+
+  if (cutscene.elapsed >= cutscene.duration) {
+    cutscene.a.object.position.copy(cutscene.startB);
+    cutscene.b.object.position.copy(cutscene.startA);
+    cutscene.a.object.position.y = getShamblesBaseY(cutscene.a.id);
+    cutscene.b.object.position.y = getShamblesBaseY(cutscene.b.id);
+    world.remove(cutscene.effects.group);
+    shamblesCutscene = null;
+    state.message = "Shambles concluido.";
+  }
+
+  return true;
+}
+
+function getShamblesBaseY(id) {
+  return id === "ball" ? 0.98 : 0.65;
+}
+
+function smoothStep(t) {
+  return t * t * (3 - 2 * t);
 }
 
 function spawnStretchArm() {
@@ -1613,6 +1911,7 @@ function updateAbility(dt) {
 }
 
 function clearAbility() {
+  shamblesTargeting = null;
   if (activeAbility?.cuts) {
     for (const cut of activeAbility.cuts) {
       world.remove(cut.group);
@@ -1650,6 +1949,8 @@ function updateRoomCuts(dt) {
 }
 
 function handleCanvasPointer(event) {
+  if (chooseShamblesTarget(event)) return;
+
   if (!activeAbility || activeAbility.type !== "room" || !state.isPlaying) return;
 
   if (!roomContains(player.position)) {
@@ -1712,8 +2013,9 @@ function distancePointToSegment(point, start, end) {
 function update() {
   const dt = Math.min(clock.getDelta(), 0.033);
   const elapsed = clock.elapsedTime;
+  const inCutscene = updateShamblesCutscene(dt, elapsed);
 
-  if (state.isPlaying && state.timeLeft > 0 && state.justScored <= 0) {
+  if (!inCutscene && state.isPlaying && state.timeLeft > 0 && state.justScored <= 0) {
     state.timeLeft = Math.max(0, state.timeLeft - dt);
   }
 
@@ -1722,7 +2024,7 @@ function update() {
   state.justScored = Math.max(0, state.justScored - dt);
 
   updateOcean(elapsed);
-  if (state.isPlaying) {
+  if (state.isPlaying && !inCutscene) {
     updatePlayer(dt, elapsed);
     updateAI(dt, elapsed);
     updateCannonball(dt, elapsed);
@@ -1737,7 +2039,7 @@ function update() {
   }
   updateAbility(dt);
   updateWake(dt);
-  updateCamera(dt);
+  if (!inCutscene) updateCamera(dt);
   updateHud();
   renderer.render(scene, camera);
   updatePreview(dt, elapsed);
@@ -1918,6 +2220,11 @@ function resetMatch() {
 }
 
 function resetRound(message) {
+  shamblesTargeting = null;
+  if (shamblesCutscene) {
+    world.remove(shamblesCutscene.effects.group);
+    shamblesCutscene = null;
+  }
   state.justScored = 1.2;
   state.message = message;
   player.position.set(0, 0.65, 23);
