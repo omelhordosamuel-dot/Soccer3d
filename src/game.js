@@ -229,8 +229,12 @@ const multiplayer = {
   remoteInput: { turn: 0, throttle: 0, boost: false },
   lastInputSent: 0,
   lastSnapshotSent: 0,
+  hostSkin: "classic",
+  guestSkin: "classic",
+  snapshotTarget: null,
   connected: false
 };
+let abilityContext = null;
 const preview = {
   scene: null,
   camera: null,
@@ -466,7 +470,7 @@ adminResetCharactersButton.addEventListener("click", () => runAdminAction(() => 
   progress.discovered ||= {};
   clearAbility();
   saveProgress();
-  applySkinToBoat(player, "classic");
+  announceMultiplayerSkin();
   selectPreviewSkin("classic");
   renderShop();
   renderCrafting();
@@ -680,7 +684,7 @@ function renderShop() {
 
       progress.selectedSkin = skinId;
       saveProgress();
-      applySkinToBoat(player, skinId);
+      announceMultiplayerSkin();
       selectPreviewSkin(skinId);
       renderShop();
     });
@@ -712,7 +716,7 @@ function renderAdminSkinButton(skinId, skin) {
     if (skinId === "classic" && !progress.unlocked.includes(skinId)) progress.unlocked.push(skinId);
     progress.selectedSkin = skinId;
     saveProgress();
-    applySkinToBoat(player, skinId);
+    announceMultiplayerSkin();
     selectPreviewSkin(skinId);
     renderShop();
     renderCrafting();
@@ -1173,7 +1177,7 @@ function tryForbiddenCraft() {
   progress.selectedSkin = "lawSahur";
   forbiddenCraft.slots = Array(9).fill(null);
   saveProgress();
-  applySkinToBoat(player, "lawSahur");
+  announceMultiplayerSkin();
   selectPreviewSkin("lawSahur");
   boxResult.textContent = `${SKINS.lawSahur.name} criado.`;
   renderShop();
@@ -1196,7 +1200,7 @@ function craftRecipe(recipe) {
   addCharacterCopies(recipe.output, 1);
   progress.selectedSkin = recipe.output;
   saveProgress();
-  applySkinToBoat(player, recipe.output);
+  announceMultiplayerSkin();
   selectPreviewSkin(recipe.output);
   boxResult.textContent = `${SKINS[recipe.output].name} craftado e equipado.`;
   renderShop();
@@ -1227,7 +1231,7 @@ function openRewardBox() {
   const skin = SKINS[skinId];
   addCharacterCopies(skinId, 1);
   progress.selectedSkin = skinId;
-  applySkinToBoat(player, skinId);
+  announceMultiplayerSkin();
   selectPreviewSkin(skinId);
   boxResult.textContent = `${skin.rarityLabel}! Voce recebeu 1 copia de ${skin.name}. Total: ${progress.inventory[skinId]}.`;
 
@@ -1286,6 +1290,7 @@ function startMatch(wagerMode, multiplayerRole = null) {
   state.isPlaying = true;
   mainMenu.hidden = true;
   resetMatch();
+  syncMultiplayerSkins();
   if (multiplayerRole) {
     state.message = multiplayerRole === "host"
       ? "Sala multiplayer ativa. Voce controla o barco azul."
@@ -1390,6 +1395,7 @@ function createSkinMaterials() {
 }
 
 function applySkinToBoat(boat, skinId) {
+  if (boat.userData.skinId === skinId) return;
   const skin = skinMaterials[skinId] || skinMaterials.classic;
   boat.traverse((part) => {
     if (!part.isMesh) return;
@@ -1401,19 +1407,92 @@ function applySkinToBoat(boat, skinId) {
       if (skin.portrait) part.material = skin.portrait;
     }
   });
+  boat.userData.skinId = skinId;
+}
+
+function getLocalBoat() {
+  return state.multiplayerRole === "guest" ? ai : player;
+}
+
+function getOpponentBoat() {
+  return state.multiplayerRole === "guest" ? player : ai;
+}
+
+function getAbilityBoat() {
+  return abilityContext?.boat || getLocalBoat();
+}
+
+function getAbilitySkinId() {
+  return abilityContext?.skinId || progress.selectedSkin;
+}
+
+function getAbilityCooldown() {
+  if (abilityContext) return abilityContext.boat.userData.abilityCooldown || 0;
+  return state.abilityCooldown;
+}
+
+function setAbilityCooldown(value) {
+  if (abilityContext) {
+    abilityContext.boat.userData.abilityCooldown = value;
+    return;
+  }
+  state.abilityCooldown = value;
+}
+
+function runAbilityAs(boat, skinId, callback) {
+  const previous = abilityContext;
+  abilityContext = { boat, skinId };
+  try {
+    return callback();
+  } finally {
+    abilityContext = previous;
+  }
+}
+
+function syncMultiplayerSkins() {
+  if (state.multiplayerRole === "host") {
+    multiplayer.hostSkin = progress.selectedSkin;
+    applySkinToBoat(player, multiplayer.hostSkin);
+    applySkinToBoat(ai, multiplayer.guestSkin || "classic");
+    return;
+  }
+
+  if (state.multiplayerRole === "guest") {
+    multiplayer.guestSkin = progress.selectedSkin;
+    applySkinToBoat(player, multiplayer.hostSkin || "classic");
+    applySkinToBoat(ai, multiplayer.guestSkin);
+    return;
+  }
+
+  applySkinToBoat(player, progress.selectedSkin);
+}
+
+function announceMultiplayerSkin() {
+  syncMultiplayerSkins();
+  if (state.multiplayerRole === "guest") {
+    sendMultiplayerRelay({ type: "skin", skinId: progress.selectedSkin });
+  }
+}
+
+function sendMultiplayerAbility(action, payload = {}) {
+  if (state.multiplayerRole !== "guest" || abilityContext) return;
+  sendMultiplayerRelay({ type: "ability", action, payload, skinId: progress.selectedSkin });
 }
 
 function useAbility() {
-  if (!state.isPlaying || state.abilityCooldown > 0) return;
+  if (!state.isPlaying || getAbilityCooldown() > 0) return;
 
-  const skin = SKINS[progress.selectedSkin];
+  const boat = getAbilityBoat();
+  const skin = SKINS[getAbilitySkinId()];
   if (!skin) return;
 
+  sendMultiplayerAbility("primary");
+
   if (skin.type === "boost") {
-    const forward = getForward(player);
-    player.userData.velocity.addScaledVector(forward, 10);
-    splash(player.position, materials.foam);
-    state.abilityCooldown = 3.2;
+    const forward = getForward(boat);
+    boat.userData.velocity.addScaledVector(forward, 10);
+    splash(boat.position, materials.foam);
+    setAbilityCooldown(3.2);
     state.message = "Rajada classica ativada.";
     return;
   }
@@ -1425,16 +1504,17 @@ function useAbility() {
 
 function useRoomCut() {
   if (!state.isPlaying || !activeAbility || activeAbility.type !== "room") return;
-  const skin = SKINS[progress.selectedSkin];
+  const skin = SKINS[getAbilitySkinId()];
   if (!skin?.roomCuts || activeAbility.cutsRemaining <= 0) return;
 
+  sendMultiplayerAbility("roomCut");
   spawnLawRoomCut();
   activeAbility.cutsRemaining -= 1;
   state.message = `Corte de espada Wano usado. Restam ${activeAbility.cutsRemaining}.`;
 }
 
 function useShambles() {
-  const skin = SKINS[progress.selectedSkin];
+  const skin = SKINS[getAbilitySkinId()];
   if (!state.isPlaying || !skin?.shambles || !activeAbility || activeAbility.type !== "room" || shamblesCutscene) return;
 
   const now = performance.now();
@@ -1461,6 +1541,7 @@ function chooseShamblesTarget(event) {
 
   if (shamblesTargeting.mode === "player") {
     startShamblesCutscene(getShamblesObject("player"), target);
+    sendMultiplayerAbility("shambles", { mode: "player", targetId: target.id });
     shamblesTargeting = null;
     return true;
   }
@@ -1478,6 +1559,7 @@ function chooseShamblesTarget(event) {
   }
 
   startShamblesCutscene(first, target);
+  sendMultiplayerAbility("shambles", { mode: "pair", targetIds: [first.id, target.id] });
   shamblesTargeting = null;
   return true;
 }
@@ -1499,8 +1581,8 @@ function pickShamblesObject(event) {
 }
 
 function getShamblesObject(id) {
-  if (id === "player") return { id, object: player };
-  if (id === "enemy") return { id, object: ai };
+  if (id === "player") return { id, object: getAbilityBoat() };
+  if (id === "enemy") return { id, object: abilityContext ? player : getOpponentBoat() };
   return { id: "ball", object: cannonball };
 }
 
@@ -1610,8 +1692,9 @@ function smoothStep(t) {
 
 function spawnStretchArm() {
   clearAbility();
-  const forward = getForward(player);
-  const origin = player.position.clone().addScaledVector(forward, 3.1);
+  const boat = getAbilityBoat();
+  const forward = getForward(boat);
+  const origin = boat.position.clone().addScaledVector(forward, 3.1);
   origin.y = 1.05;
   const length = 17.5;
   const group = new THREE.Group();
@@ -1639,7 +1722,7 @@ function spawnStretchArm() {
   group.add(fist);
 
   group.position.copy(origin);
-  group.rotation.y = player.userData.heading;
+  group.rotation.y = boat.userData.heading;
   world.add(group);
 
   activeAbility = {
@@ -1651,7 +1734,7 @@ function spawnStretchArm() {
     life: 0.38,
     hit: false
   };
-  state.abilityCooldown = 5.2;
+  setAbilityCooldown(5.2);
   state.message = "Braco elastico lancado.";
 }
 
@@ -1693,7 +1776,8 @@ function createFistModel() {
 
 function spawnSwordSlash() {
   clearAbility();
-  const forward = getForward(player);
+  const boat = getAbilityBoat();
+  const forward = getForward(boat);
   const group = new THREE.Group();
   const swordRig = new THREE.Group();
   const rays = new THREE.Group();
@@ -1745,8 +1829,8 @@ function spawnSwordSlash() {
 
   group.add(swordRig);
   group.add(rays);
-  group.position.copy(player.position);
-  group.rotation.y = player.userData.heading;
+  group.position.copy(boat.position);
+  group.rotation.y = boat.userData.heading;
   world.add(group);
 
   activeAbility = {
@@ -1758,7 +1842,7 @@ function spawnSwordSlash() {
     speed: 34,
     hit: false
   };
-  state.abilityCooldown = 5.8;
+  setAbilityCooldown(5.8);
   state.message = "Tres espadas surgiram. Cortes verdes disparados.";
 }
 
@@ -1816,11 +1900,12 @@ function createSwordModel(bladeMaterial = materials.blade) {
 
 function spawnRoomDome() {
   clearAbility();
-  const skin = SKINS[progress.selectedSkin];
+  const boat = getAbilityBoat();
+  const skin = SKINS[getAbilitySkinId()];
   const radius = skin?.domeRadius || 12.5;
   const duration = skin?.domeDuration || (skin?.roomCuts ? 5 : 4.2);
   const dome = new THREE.Mesh(new THREE.SphereGeometry(radius, 36, 18, 0, Math.PI * 2, 0, Math.PI / 2), materials.dome);
-  dome.position.copy(player.position);
+  dome.position.copy(boat.position);
   dome.position.y = 0.15;
   dome.scale.y = 0.62;
   world.add(dome);
@@ -1828,7 +1913,7 @@ function spawnRoomDome() {
   activeAbility = {
     type: "room",
     group: dome,
-    origin: player.position.clone(),
+    origin: boat.position.clone(),
     radius,
     life: duration,
     cutsRemaining: skin?.roomCuts || 0,
@@ -1836,7 +1921,7 @@ function spawnRoomDome() {
     clearAfterTeleport: skin?.roomClearsAfterTeleport !== false,
     cuts: []
   };
-  state.abilityCooldown = skin?.domeCooldown || 7.5;
+  setAbilityCooldown(skin?.domeCooldown || 7.5);
   state.message = skin?.roomCuts
     ? "Room Wano ativo por 5s. 2 teleportes e 2 cortes de espada disponiveis."
     : skin?.domeRadius >= 20
@@ -1845,7 +1930,8 @@ function spawnRoomDome() {
 }
 
 function spawnLawRoomCut() {
-  const forward = getForward(player);
+  const boat = getAbilityBoat();
+  const forward = getForward(boat);
   const group = new THREE.Group();
   const swordPivot = new THREE.Group();
   const sword = createLawSwordModel();
@@ -1862,8 +1948,8 @@ function spawnLawRoomCut() {
   slash.rotation.z = 0.34;
   group.add(slash);
 
-  group.position.copy(player.position);
-  group.rotation.y = player.userData.heading;
+  group.position.copy(boat.position);
+  group.rotation.y = boat.userData.heading;
   world.add(group);
 
   activeAbility.cuts.push({
@@ -2022,8 +2108,9 @@ function handleCanvasPointer(event) {
   if (chooseShamblesTarget(event)) return;
 
   if (!activeAbility || activeAbility.type !== "room" || !state.isPlaying) return;
+  const boat = getAbilityBoat();
 
-  if (!roomContains(player.position)) {
+  if (!roomContains(boat.position)) {
     state.message = "Voce precisa estar dentro do Room para teleportar.";
     return;
   }
@@ -2035,22 +2122,28 @@ function handleCanvasPointer(event) {
 
   const target = new THREE.Vector3();
   if (!raycaster.ray.intersectPlane(oceanPlane, target)) return;
-  target.x = THREE.MathUtils.clamp(target.x, -ARENA.width / 2 + player.userData.radius, ARENA.width / 2 - player.userData.radius);
-  target.z = THREE.MathUtils.clamp(target.z, -ARENA.depth / 2 + player.userData.radius, ARENA.depth / 2 - player.userData.radius);
+  target.x = THREE.MathUtils.clamp(target.x, -ARENA.width / 2 + boat.userData.radius, ARENA.width / 2 - boat.userData.radius);
+  target.z = THREE.MathUtils.clamp(target.z, -ARENA.depth / 2 + boat.userData.radius, ARENA.depth / 2 - boat.userData.radius);
 
   if (!roomContains(target)) {
     state.message = "Escolha um ponto dentro do Room.";
     return;
   }
 
+  teleportInsideRoom(target);
+}
+
+function teleportInsideRoom(target) {
+  const boat = getAbilityBoat();
   if ((activeAbility.teleportsRemaining || 0) <= 0) {
     state.message = "Teleportes do Room usados. Cortes ainda podem ser usados enquanto ele estiver ativo.";
     return;
   }
 
-  player.position.set(target.x, 0.65, target.z);
-  player.userData.velocity.multiplyScalar(0.25);
-  splash(player.position, materials.dome);
+  sendMultiplayerAbility("teleport", { x: target.x, z: target.z });
+  boat.position.set(target.x, 0.65, target.z);
+  boat.userData.velocity.multiplyScalar(0.25);
+  splash(boat.position, materials.dome);
   activeAbility.teleportsRemaining -= 1;
   if (activeAbility.teleportsRemaining <= 0) {
     if (activeAbility.clearAfterTeleport) {
@@ -2097,6 +2190,7 @@ function update() {
   if (state.isPlaying && !inCutscene) {
     if (state.multiplayerRole === "guest") {
       sendMultiplayerInput(elapsed);
+      interpolateMultiplayerSnapshot(dt);
       animateBoat(player, elapsed);
       animateBoat(ai, elapsed + 0.7);
     } else {
@@ -2198,6 +2292,7 @@ function updateAI(dt, elapsed) {
 
 function updateRemoteBoat(dt, elapsed) {
   ai.userData.remoteBoostCooldown = Math.max(0, (ai.userData.remoteBoostCooldown || 0) - dt);
+  ai.userData.abilityCooldown = Math.max(0, (ai.userData.abilityCooldown || 0) - dt);
   const input = multiplayer.remoteInput;
   const velocity = ai.userData.velocity;
   const speedFactor = THREE.MathUtils.clamp(velocity.length() / 7, 0.38, 1.3);
@@ -2352,7 +2447,7 @@ function resetRound(message) {
   cannonball.userData.velocity.set((Math.random() - 0.5) * 4.2, 0, (Math.random() - 0.5) * 3.6);
   player.userData.heading = Math.PI;
   ai.userData.heading = 0;
-  applySkinToBoat(player, progress.selectedSkin);
+  syncMultiplayerSkins();
 }
 
 function setMultiplayerStatus(message) {
@@ -2418,6 +2513,9 @@ function connectMultiplayerServer() {
       multiplayer.roomCode = "";
       multiplayer.role = null;
       multiplayer.remoteInput = { turn: 0, throttle: 0, boost: false };
+      multiplayer.hostSkin = "classic";
+      multiplayer.guestSkin = "classic";
+      multiplayer.snapshotTarget = null;
       state.multiplayerRole = null;
       updateMultiplayerUi();
       setMultiplayerStatus("Conexao multiplayer fechada.");
@@ -2465,6 +2563,9 @@ function leaveMultiplayerRoom(message = "Voce saiu da sala.") {
   multiplayer.roomCode = "";
   multiplayer.role = null;
   multiplayer.remoteInput = { turn: 0, throttle: 0, boost: false };
+  multiplayer.hostSkin = "classic";
+  multiplayer.guestSkin = "classic";
+  multiplayer.snapshotTarget = null;
   state.multiplayerRole = null;
   setMultiplayerStatus(message);
   updateMultiplayerUi();
@@ -2479,6 +2580,8 @@ function handleMultiplayerMessage(data) {
   if (data.type === "roomCreated") {
     multiplayer.roomCode = data.roomCode;
     multiplayer.role = "host";
+    multiplayer.hostSkin = progress.selectedSkin;
+    multiplayer.guestSkin = "classic";
     roomCodeInput.value = data.roomCode;
     updateMultiplayerUi();
     setMultiplayerStatus(`Sala ${data.roomCode} criada. Esperando outro jogador.`);
@@ -2488,6 +2591,10 @@ function handleMultiplayerMessage(data) {
   if (data.type === "roomJoined") {
     multiplayer.roomCode = data.roomCode;
     multiplayer.role = data.role;
+    if (data.role === "guest") {
+      multiplayer.guestSkin = progress.selectedSkin;
+      sendMultiplayerRelay({ type: "skin", skinId: progress.selectedSkin });
+    }
     roomCodeInput.value = data.roomCode;
     updateMultiplayerUi();
     setMultiplayerStatus(data.role === "host" ? `Sala ${data.roomCode} pronta.` : `Voce entrou na sala ${data.roomCode}.`);
@@ -2497,8 +2604,9 @@ function handleMultiplayerMessage(data) {
   if (data.type === "peerJoined") {
     setMultiplayerStatus("Outro jogador entrou. Iniciando partida.");
     if (multiplayer.role === "host") {
+      multiplayer.hostSkin = progress.selectedSkin;
       startMatch(false, "host");
-      sendMultiplayerRelay({ type: "start" });
+      sendMultiplayerRelay({ type: "start", hostSkin: progress.selectedSkin, guestSkin: multiplayer.guestSkin || "classic" });
     }
     return;
   }
@@ -2522,7 +2630,18 @@ function handleMultiplayerMessage(data) {
 
 function handleMultiplayerRelay(message) {
   if (message.type === "start" && multiplayer.role === "guest") {
+    multiplayer.hostSkin = SKINS[message.hostSkin] ? message.hostSkin : "classic";
+    multiplayer.guestSkin = progress.selectedSkin;
     startMatch(false, "guest");
+    syncMultiplayerSkins();
+    sendMultiplayerRelay({ type: "skin", skinId: progress.selectedSkin });
+    return;
+  }
+
+  if (message.type === "skin" && multiplayer.role === "host") {
+    const skinId = SKINS[message.skinId] ? message.skinId : "classic";
+    multiplayer.guestSkin = skinId;
+    applySkinToBoat(ai, skinId);
     return;
   }
 
@@ -2535,9 +2654,60 @@ function handleMultiplayerRelay(message) {
     return;
   }
 
+  if (message.type === "ability" && multiplayer.role === "host") {
+    runRemoteGuestAbility(message);
+    return;
+  }
+
   if (message.type === "snapshot" && multiplayer.role === "guest") {
     applyMultiplayerSnapshot(message.snapshot);
   }
+}
+
+function runRemoteGuestAbility(message) {
+  const skinId = SKINS[message.skinId] ? message.skinId : multiplayer.guestSkin || "classic";
+  multiplayer.guestSkin = skinId;
+  applySkinToBoat(ai, skinId);
+
+  runAbilityAs(ai, skinId, () => {
+    if (message.action === "primary") {
+      useAbility();
+      return;
+    }
+
+    if (message.action === "roomCut") {
+      useRoomCut();
+      return;
+    }
+
+    if (message.action === "teleport") {
+      const target = new THREE.Vector3(
+        THREE.MathUtils.clamp(Number(message.payload?.x) || ai.position.x, -ARENA.width / 2 + ai.userData.radius, ARENA.width / 2 - ai.userData.radius),
+        0.65,
+        THREE.MathUtils.clamp(Number(message.payload?.z) || ai.position.z, -ARENA.depth / 2 + ai.userData.radius, ARENA.depth / 2 - ai.userData.radius)
+      );
+      if (activeAbility?.type === "room" && roomContains(ai.position) && roomContains(target)) {
+        teleportInsideRoom(target);
+      }
+      return;
+    }
+
+    if (message.action === "shambles" && activeAbility?.type === "room") {
+      if (message.payload?.mode === "player") {
+        const target = getShamblesObject(message.payload.targetId);
+        if (target && roomContains(target.object.position)) startShamblesCutscene(getShamblesObject("player"), target);
+        return;
+      }
+
+      if (message.payload?.mode === "pair" && Array.isArray(message.payload.targetIds)) {
+        const first = getShamblesObject(message.payload.targetIds[0]);
+        const second = getShamblesObject(message.payload.targetIds[1]);
+        if (first && second && first.id !== second.id && roomContains(first.object.position) && roomContains(second.object.position)) {
+          startShamblesCutscene(first, second);
+        }
+      }
+    }
+  });
 }
 
 function getLocalInputState() {
@@ -2569,8 +2739,15 @@ function applyTransform(object, transform) {
   object.userData.heading = transform.h;
 }
 
+function lerpTransform(object, transform, alpha) {
+  if (!transform) return;
+  object.position.lerp(new THREE.Vector3(transform.p[0], transform.p[1], transform.p[2]), alpha);
+  object.userData.velocity.lerp(new THREE.Vector3(transform.v[0], transform.v[1], transform.v[2]), alpha);
+  object.userData.heading = THREE.MathUtils.lerp(object.userData.heading || 0, transform.h, alpha);
+}
+
 function sendMultiplayerSnapshot(elapsed) {
-  if (multiplayer.role !== "host" || elapsed - multiplayer.lastSnapshotSent < 0.05) return;
+  if (multiplayer.role !== "host" || elapsed - multiplayer.lastSnapshotSent < 0.033) return;
   multiplayer.lastSnapshotSent = elapsed;
   sendMultiplayerRelay({
     type: "snapshot",
@@ -2581,21 +2758,52 @@ function sendMultiplayerSnapshot(elapsed) {
       score: [state.playerScore, state.aiScore],
       timeLeft: state.timeLeft,
       justScored: state.justScored,
-      message: state.message
+      message: state.message,
+      skins: {
+        host: multiplayer.hostSkin || progress.selectedSkin,
+        guest: multiplayer.guestSkin || "classic"
+      }
     }
   });
 }
 
 function applyMultiplayerSnapshot(snapshot) {
   if (!snapshot) return;
-  applyTransform(player, snapshot.player);
-  applyTransform(ai, snapshot.ai);
-  applyTransform(cannonball, snapshot.cannonball);
+  const firstSnapshot = !multiplayer.snapshotTarget;
+  multiplayer.snapshotTarget = snapshot;
+  applySnapshotSkins(snapshot.skins);
+  if (firstSnapshot) {
+    applyTransform(player, snapshot.player);
+    applyTransform(ai, snapshot.ai);
+    applyTransform(cannonball, snapshot.cannonball);
+  }
   state.playerScore = snapshot.score?.[0] ?? state.playerScore;
   state.aiScore = snapshot.score?.[1] ?? state.aiScore;
   state.timeLeft = snapshot.timeLeft ?? state.timeLeft;
   state.justScored = snapshot.justScored ?? state.justScored;
   state.message = snapshot.message || state.message;
+}
+
+function interpolateMultiplayerSnapshot(dt) {
+  const snapshot = multiplayer.snapshotTarget;
+  if (!snapshot) return;
+
+  const alpha = 1 - Math.pow(0.0008, dt);
+  lerpTransform(player, snapshot.player, alpha);
+  lerpTransform(ai, snapshot.ai, alpha);
+  lerpTransform(cannonball, snapshot.cannonball, alpha);
+}
+
+function applySnapshotSkins(skins) {
+  if (!skins) return;
+  if (SKINS[skins.host] && multiplayer.hostSkin !== skins.host) {
+    multiplayer.hostSkin = skins.host;
+    if (state.multiplayerRole === "guest") applySkinToBoat(player, skins.host);
+  }
+  if (SKINS[skins.guest] && multiplayer.guestSkin !== skins.guest) {
+    multiplayer.guestSkin = skins.guest;
+    if (state.multiplayerRole === "guest") applySkinToBoat(ai, skins.guest);
+  }
 }
 
 function updateCamera(dt) {
