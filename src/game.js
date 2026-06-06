@@ -10,6 +10,8 @@ const mainMenu = document.querySelector("#mainMenu");
 const menuButton = document.querySelector("#menuButton");
 const playSoloButton = document.querySelector("#playSoloButton");
 const playWagerButton = document.querySelector("#playWagerButton");
+const wagerAmountInput = document.querySelector("#wagerAmount");
+const wagerPayoutInfo = document.querySelector("#wagerPayoutInfo");
 const aiDifficultySelect = document.querySelector("#aiDifficulty");
 const multiplayerServerUrl = document.querySelector("#multiplayerServerUrl");
 const createRoomButton = document.querySelector("#createRoomButton");
@@ -63,12 +65,21 @@ const ARENA = { width: 58, depth: 82, goalWidth: 18, goalDepth: 7 };
 const PROGRESS_KEY = "futebolNavalProgress.v1";
 const BOX_COST = 80;
 const SECRET_ITEM_CHANCE = 0.1;
+const SOLO_MATCH_SECONDS = 90;
+const ONLINE_MATCH_SECONDS = 120;
 const AI_DIFFICULTIES = {
   easy: { label: "Facil", thrust: 1.15, turnRate: 1.25, maxSpeed: 9.2, damping: 0.16, prediction: 0.1, error: 7.5, attackLine: -10, guardBias: 0.55 },
   medium: { label: "Medio", thrust: 1.85, turnRate: 2.1, maxSpeed: 13, damping: 0.22, prediction: 0.35, error: 3.6, attackLine: -4, guardBias: 0.35 },
   hard: { label: "Dificil", thrust: 2.35, turnRate: 2.85, maxSpeed: 15.5, damping: 0.28, prediction: 0.62, error: 1.5, attackLine: 4, guardBias: 0.18 },
   impossible: { label: "Impossivel", thrust: 2.85, turnRate: 3.4, maxSpeed: 17.4, damping: 0.34, prediction: 0.88, error: 0.5, attackLine: 12, guardBias: 0.08 },
   einstein: { label: "Albert Einstein", thrust: 3.35, turnRate: 4.2, maxSpeed: 19.2, damping: 0.42, prediction: 1.2, error: 0, attackLine: 20, guardBias: 0 }
+};
+const SOLO_WAGER_MULTIPLIERS = {
+  easy: 1.35,
+  medium: 1.75,
+  hard: 2.35,
+  impossible: 3.4,
+  einstein: 5
 };
 const keys = new Set();
 const clock = new THREE.Clock();
@@ -208,6 +219,7 @@ const state = {
   justScored: 0,
   isPlaying: false,
   wagerMode: false,
+  wagerAmount: 0,
   multiplayerRole: null,
   matchRewarded: false,
   message: "Empurre a bola de canhao ate o navio-gol rival."
@@ -402,15 +414,19 @@ for (let i = 0; i < 46; i += 1) {
 
 initPreview();
 
-resetButton.addEventListener("click", () => {
-  if (state.multiplayerRole !== "guest") resetMatch();
-});
+resetButton.addEventListener("click", () => requestMatchReset());
 menuButton.addEventListener("click", () => openMenu());
 playSoloButton.addEventListener("click", () => startMatch(false));
 playWagerButton.addEventListener("click", () => startMatch(true));
 aiDifficultySelect.addEventListener("change", () => {
   progress.aiDifficulty = aiDifficultySelect.value;
   saveProgress();
+  renderSettings();
+  renderShop();
+});
+wagerAmountInput.addEventListener("input", () => {
+  renderSettings();
+  renderShop();
 });
 createRoomButton.addEventListener("click", () => createMultiplayerRoom());
 joinRoomButton.addEventListener("click", () => joinMultiplayerRoom());
@@ -504,7 +520,7 @@ previewCanvas.addEventListener("pointercancel", () => {
 });
 window.addEventListener("keydown", (event) => {
   keys.add(event.code);
-  if (event.code === "KeyR" && state.multiplayerRole !== "guest") resetMatch();
+  if (event.code === "KeyR") requestMatchReset();
   if (event.code === "KeyE") useAbility();
   if (event.code === "KeyX") useRoomCut();
   if (event.code === "KeyZ") useShambles();
@@ -621,7 +637,11 @@ function renderShop() {
   coinAmountEl.textContent = progress.coins;
   activeSkinNameEl.textContent = SKINS[progress.selectedSkin].name;
   previewSkinName.textContent = SKINS[preview.selectedSkin]?.name || SKINS[progress.selectedSkin].name;
-  playWagerButton.disabled = progress.coins < 25;
+  renderSettings();
+  const wagerAmount = getSelectedWagerAmount();
+  playWagerButton.disabled = wagerAmount <= 0 || wagerAmount > progress.coins;
+  createRoomButton.disabled = wagerAmount > progress.coins || (multiplayer.connected && Boolean(multiplayer.roomCode));
+  joinRoomButton.disabled = wagerAmount > progress.coins || (multiplayer.connected && Boolean(multiplayer.roomCode));
   openBoxButton.disabled = progress.coins < BOX_COST;
   updateContextControls();
   shopGrid.innerHTML = "";
@@ -741,6 +761,21 @@ function renderSettings() {
   cameraZoomInput.value = progress.cameraZoom;
   cameraZoomValue.textContent = ["Normal", "Mais perto", "Bem perto"][progress.cameraZoom] || "Normal";
   aiDifficultySelect.value = progress.aiDifficulty || "medium";
+  const wagerAmount = getSelectedWagerAmount();
+  const multiplier = SOLO_WAGER_MULTIPLIERS[progress.aiDifficulty] || SOLO_WAGER_MULTIPLIERS.medium;
+  const soloPayout = Math.round(wagerAmount * multiplier);
+  const onlinePayout = wagerAmount * 2;
+  wagerAmountInput.max = String(progress.coins);
+  playWagerButton.querySelector("strong").textContent = wagerAmount > 0 ? `Aposta solo - ${wagerAmount}` : "Aposta solo";
+  wagerPayoutInfo.textContent =
+    wagerAmount > 0
+      ? `Solo ${AI_DIFFICULTIES[progress.aiDifficulty]?.label || "Medio"}: ${soloPayout}. Online: ${onlinePayout}.`
+      : "Sem aposta: partida casual.";
+}
+
+function getSelectedWagerAmount() {
+  const amount = Math.floor(Number(wagerAmountInput.value) || 0);
+  return Math.max(0, amount);
 }
 
 function initPreview() {
@@ -1274,18 +1309,26 @@ function openMenu() {
 }
 
 function startMatch(wagerMode, multiplayerRole = null) {
-  if (wagerMode && progress.coins < 25) {
-    state.message = "Voce precisa de 25 moedas para apostar.";
+  const selectedWager = wagerMode || multiplayerRole ? getSelectedWagerAmount() : 0;
+  if (wagerMode && selectedWager <= 0) {
+    state.message = "Escolha quantas moedas voce quer apostar.";
     renderShop();
-    return;
+    return false;
   }
 
-  if (wagerMode) {
-    progress.coins -= 25;
+  if (selectedWager > progress.coins) {
+    state.message = "Voce nao tem moedas suficientes para essa aposta.";
+    renderShop();
+    return false;
+  }
+
+  if (selectedWager > 0) {
+    progress.coins -= selectedWager;
     saveProgress();
   }
 
-  state.wagerMode = wagerMode;
+  state.wagerMode = selectedWager > 0;
+  state.wagerAmount = selectedWager;
   state.multiplayerRole = multiplayerRole;
   state.isPlaying = true;
   mainMenu.hidden = true;
@@ -1295,13 +1338,15 @@ function startMatch(wagerMode, multiplayerRole = null) {
     state.message = multiplayerRole === "host"
       ? "Sala multiplayer ativa. Voce controla o barco azul."
       : "Sala multiplayer ativa. Voce controla o barco vermelho.";
+    if (selectedWager > 0) state.message += ` Aposta online: ${selectedWager} moedas.`;
     renderShop();
-    return;
+    return true;
   }
   state.message = wagerMode
-    ? "Aposta solo ativa: venca para ganhar bonus."
+    ? `Aposta solo ativa: ${selectedWager} moedas.`
     : "Partida solo ativa. Marque gols para ganhar moedas.";
   renderShop();
+  return true;
 }
 
 function awardCoins(amount, message) {
@@ -1315,13 +1360,46 @@ function checkMatchEnd() {
   if (state.timeLeft > 0 || state.matchRewarded) return;
 
   state.matchRewarded = true;
-  if (state.playerScore > state.aiScore) {
-    awardCoins(state.wagerMode ? 90 : 45, state.wagerMode ? "Aposta vencida: +90 moedas." : "Vitoria solo: +45 moedas.");
-  } else if (state.playerScore === state.aiScore) {
-    awardCoins(state.wagerMode ? 25 : 15, state.wagerMode ? "Empate: aposta devolvida." : "Empate: +15 moedas.");
-  } else {
-    state.message = state.wagerMode ? "Aposta perdida. Tente de novo." : "Derrota. Ganhe moedas marcando gols.";
+  state.isPlaying = false;
+
+  const localScore = state.multiplayerRole === "guest" ? state.aiScore : state.playerScore;
+  const opponentScore = state.multiplayerRole === "guest" ? state.playerScore : state.aiScore;
+  const wager = state.wagerAmount || 0;
+
+  if (localScore > opponentScore) {
+    if (state.multiplayerRole) {
+      const payout = wager * 2;
+      if (payout > 0) awardCoins(payout, `Vitoria online: +${payout} moedas.`);
+      else state.message = "Vitoria online.";
+      renderShop();
+      return;
+    }
+
+    if (wager > 0) {
+      const multiplier = SOLO_WAGER_MULTIPLIERS[progress.aiDifficulty] || SOLO_WAGER_MULTIPLIERS.medium;
+      const payout = Math.round(wager * multiplier);
+      awardCoins(payout, `Aposta solo vencida: +${payout} moedas.`);
+      return;
+    }
+
+    awardCoins(30, "Vitoria solo rapida: +30 moedas.");
+    return;
   }
+
+  if (localScore === opponentScore) {
+    if (wager > 0) {
+      awardCoins(wager, `Empate: ${wager} moedas devolvidas.`);
+      return;
+    }
+    awardCoins(10, "Empate: +10 moedas.");
+    return;
+  }
+
+  state.message = wager > 0
+    ? `Derrota. Voce perdeu a aposta de ${wager} moedas.`
+    : "Derrota. Tente vencer a proxima partida.";
+  saveProgress();
+  renderShop();
 }
 
 function createSkinMaterials() {
@@ -2191,6 +2269,7 @@ function update() {
     if (state.multiplayerRole === "guest") {
       sendMultiplayerInput(elapsed);
       interpolateMultiplayerSnapshot(dt);
+      checkMatchEnd();
       animateBoat(player, elapsed);
       animateBoat(ai, elapsed + 0.7);
     } else {
@@ -2413,7 +2492,9 @@ function checkGoals() {
 
   if (scoredNorth) {
     state.playerScore += 1;
-    awardCoins(18, "Gol naval: +18 moedas.");
+    if (!state.wagerMode && !state.multiplayerRole) {
+      awardCoins(8, "Gol naval: +8 moedas.");
+    }
     resetRound("Impacto no navio vermelho. Ponto azul.");
   }
 
@@ -2426,9 +2507,18 @@ function checkGoals() {
 function resetMatch() {
   state.playerScore = 0;
   state.aiScore = 0;
-  state.timeLeft = 150;
+  state.timeLeft = state.multiplayerRole ? ONLINE_MATCH_SECONDS : SOLO_MATCH_SECONDS;
   state.matchRewarded = false;
   resetRound("Partida reiniciada. Capture a bola de canhao.");
+}
+
+function requestMatchReset() {
+  if (state.multiplayerRole === "guest") return;
+  if (state.wagerMode || state.multiplayerRole) {
+    state.message = "Partida apostada nao reinicia de graca. Volte ao menu para comecar outra.";
+    return;
+  }
+  resetMatch();
 }
 
 function resetRound(message) {
@@ -2456,8 +2546,9 @@ function setMultiplayerStatus(message) {
 
 function updateMultiplayerUi() {
   const hasRoom = Boolean(multiplayer.roomCode);
-  createRoomButton.disabled = multiplayer.connected && hasRoom;
-  joinRoomButton.disabled = multiplayer.connected && hasRoom;
+  const wagerTooHigh = getSelectedWagerAmount() > progress.coins;
+  createRoomButton.disabled = wagerTooHigh || (multiplayer.connected && hasRoom);
+  joinRoomButton.disabled = wagerTooHigh || (multiplayer.connected && hasRoom);
   roomCodeInput.disabled = multiplayer.connected && hasRoom;
   leaveRoomButton.hidden = !hasRoom;
 }
@@ -2529,6 +2620,11 @@ function connectMultiplayerServer() {
 }
 
 async function createMultiplayerRoom() {
+  if (getSelectedWagerAmount() > progress.coins) {
+    setMultiplayerStatus("Aposta maior que suas moedas.");
+    return;
+  }
+
   try {
     const socket = await connectMultiplayerServer();
     socket.send(JSON.stringify({ type: "createRoom" }));
@@ -2538,6 +2634,11 @@ async function createMultiplayerRoom() {
 }
 
 async function joinMultiplayerRoom() {
+  if (getSelectedWagerAmount() > progress.coins) {
+    setMultiplayerStatus("Aposta maior que suas moedas.");
+    return;
+  }
+
   const roomCode = roomCodeInput.value.trim().toUpperCase();
   if (!roomCode) {
     setMultiplayerStatus("Digite o codigo da sala para entrar.");
@@ -2605,8 +2706,11 @@ function handleMultiplayerMessage(data) {
     setMultiplayerStatus("Outro jogador entrou. Iniciando partida.");
     if (multiplayer.role === "host") {
       multiplayer.hostSkin = progress.selectedSkin;
-      startMatch(false, "host");
-      sendMultiplayerRelay({ type: "start", hostSkin: progress.selectedSkin, guestSkin: multiplayer.guestSkin || "classic" });
+      if (startMatch(false, "host")) {
+        sendMultiplayerRelay({ type: "start", hostSkin: progress.selectedSkin, guestSkin: multiplayer.guestSkin || "classic" });
+      } else {
+        setMultiplayerStatus("Nao foi possivel iniciar: aposta maior que suas moedas.");
+      }
     }
     return;
   }
@@ -2632,7 +2736,10 @@ function handleMultiplayerRelay(message) {
   if (message.type === "start" && multiplayer.role === "guest") {
     multiplayer.hostSkin = SKINS[message.hostSkin] ? message.hostSkin : "classic";
     multiplayer.guestSkin = progress.selectedSkin;
-    startMatch(false, "guest");
+    if (!startMatch(false, "guest")) {
+      setMultiplayerStatus("Nao foi possivel iniciar: aposta maior que suas moedas.");
+      return;
+    }
     syncMultiplayerSkins();
     sendMultiplayerRelay({ type: "skin", skinId: progress.selectedSkin });
     return;
@@ -2832,12 +2939,13 @@ function updateHud() {
   clockEl.textContent = `${minutes}:${remainder}`;
 
   if (state.timeLeft <= 0) {
-    statusEl.textContent =
+    statusEl.textContent = state.message || (
       state.playerScore === state.aiScore
         ? "Fim de jogo empatado no mar."
         : state.playerScore > state.aiScore
           ? "Fim de jogo: frota azul venceu."
-          : "Fim de jogo: frota vermelha venceu.";
+          : "Fim de jogo: frota vermelha venceu."
+    );
     return;
   }
 

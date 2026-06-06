@@ -277,6 +277,7 @@ h3 {
 }
 
 .settings-panel,
+.wager-panel,
 .difficulty-panel,
 .multiplayer-panel,
 .reward-box,
@@ -288,7 +289,8 @@ h3 {
   background: rgba(255, 255, 255, 0.06);
 }
 
-.settings-panel {
+.settings-panel,
+.wager-panel {
   display: grid;
   gap: 12px;
   margin-top: 14px;
@@ -304,6 +306,7 @@ h3 {
 }
 
 .settings-panel label,
+.wager-panel label,
 .difficulty-panel label,
 .multiplayer-panel label,
 .preview-zoom {
@@ -316,15 +319,21 @@ h3 {
   color: #dff5ff;
 }
 
+.wager-panel label {
+  color: #dff5ff;
+}
+
 .difficulty-panel label,
 .multiplayer-panel label {
   color: #dff5ff;
 }
 
-.settings-panel strong {
+.settings-panel strong,
+.wager-panel strong {
   color: #ffd65e;
 }
 
+.wager-panel input,
 .difficulty-panel select,
 .multiplayer-panel input {
   width: 100%;
