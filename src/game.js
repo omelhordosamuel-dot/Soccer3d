@@ -10,6 +10,13 @@ const mainMenu = document.querySelector("#mainMenu");
 const menuButton = document.querySelector("#menuButton");
 const playSoloButton = document.querySelector("#playSoloButton");
 const playWagerButton = document.querySelector("#playWagerButton");
+const aiDifficultySelect = document.querySelector("#aiDifficulty");
+const multiplayerServerUrl = document.querySelector("#multiplayerServerUrl");
+const createRoomButton = document.querySelector("#createRoomButton");
+const joinRoomButton = document.querySelector("#joinRoomButton");
+const leaveRoomButton = document.querySelector("#leaveRoomButton");
+const roomCodeInput = document.querySelector("#roomCodeInput");
+const multiplayerStatus = document.querySelector("#multiplayerStatus");
 const openBoxButton = document.querySelector("#openBoxButton");
 const boxResult = document.querySelector("#boxResult");
 const cameraZoomInput = document.querySelector("#cameraZoom");
@@ -56,6 +63,13 @@ const ARENA = { width: 58, depth: 82, goalWidth: 18, goalDepth: 7 };
 const PROGRESS_KEY = "futebolNavalProgress.v1";
 const BOX_COST = 80;
 const SECRET_ITEM_CHANCE = 0.1;
+const AI_DIFFICULTIES = {
+  easy: { label: "Facil", thrust: 1.15, turnRate: 1.25, maxSpeed: 9.2, damping: 0.16, prediction: 0.1, error: 7.5, attackLine: -10, guardBias: 0.55 },
+  medium: { label: "Medio", thrust: 1.85, turnRate: 2.1, maxSpeed: 13, damping: 0.22, prediction: 0.35, error: 3.6, attackLine: -4, guardBias: 0.35 },
+  hard: { label: "Dificil", thrust: 2.35, turnRate: 2.85, maxSpeed: 15.5, damping: 0.28, prediction: 0.62, error: 1.5, attackLine: 4, guardBias: 0.18 },
+  impossible: { label: "Impossivel", thrust: 2.85, turnRate: 3.4, maxSpeed: 17.4, damping: 0.34, prediction: 0.88, error: 0.5, attackLine: 12, guardBias: 0.08 },
+  einstein: { label: "Albert Einstein", thrust: 3.35, turnRate: 4.2, maxSpeed: 19.2, damping: 0.42, prediction: 1.2, error: 0, attackLine: 20, guardBias: 0 }
+};
 const keys = new Set();
 const clock = new THREE.Clock();
 const tmp = new THREE.Vector3();
@@ -128,7 +142,7 @@ const SKINS = {
     rarityLabel: "Craft+",
     ability: "Room + corte rapido",
     description: "Room grande, 2 teleportes e 2 cortes brancos de espada enquanto ele esta ativo.",
-    preview: "./src/assets/skins/law-sahur-paint.png",
+    preview: "./src/assets/skins/law-wano-paint.png",
     portrait: "./personagens/Law wano.jpg",
     type: "room",
     domeRadius: 20,
@@ -144,7 +158,7 @@ const SKINS = {
     rarityLabel: "???",
     ability: "Room + corte rapido",
     description: "Um Law proibido com um Room gigantesco.",
-    preview: "./src/assets/skins/law-wano-paint.png",
+    preview: "./src/assets/skins/law-sahur-paint.png",
     portrait: "./personagens/Law-Law Sahur.png",
     type: "room",
     domeRadius: 30,
@@ -194,6 +208,7 @@ const state = {
   justScored: 0,
   isPlaying: false,
   wagerMode: false,
+  multiplayerRole: null,
   matchRewarded: false,
   message: "Empurre a bola de canhao ate o navio-gol rival."
 };
@@ -206,6 +221,15 @@ let lastShamblesKeyTime = 0;
 let adminUnlocked = false;
 const forbiddenCraft = {
   slots: Array(9).fill(null)
+};
+const multiplayer = {
+  socket: null,
+  roomCode: "",
+  role: null,
+  remoteInput: { turn: 0, throttle: 0, boost: false },
+  lastInputSent: 0,
+  lastSnapshotSent: 0,
+  connected: false
 };
 const preview = {
   scene: null,
@@ -374,10 +398,19 @@ for (let i = 0; i < 46; i += 1) {
 
 initPreview();
 
-resetButton.addEventListener("click", () => resetMatch());
+resetButton.addEventListener("click", () => {
+  if (state.multiplayerRole !== "guest") resetMatch();
+});
 menuButton.addEventListener("click", () => openMenu());
 playSoloButton.addEventListener("click", () => startMatch(false));
 playWagerButton.addEventListener("click", () => startMatch(true));
+aiDifficultySelect.addEventListener("change", () => {
+  progress.aiDifficulty = aiDifficultySelect.value;
+  saveProgress();
+});
+createRoomButton.addEventListener("click", () => createMultiplayerRoom());
+joinRoomButton.addEventListener("click", () => joinMultiplayerRoom());
+leaveRoomButton.addEventListener("click", () => leaveMultiplayerRoom("Voce saiu da sala."));
 openBoxButton.addEventListener("click", () => openRewardBox());
 playTabButton.addEventListener("click", () => setMenuTab("play"));
 shopTabButton.addEventListener("click", () => setMenuTab("shop"));
@@ -467,7 +500,7 @@ previewCanvas.addEventListener("pointercancel", () => {
 });
 window.addEventListener("keydown", (event) => {
   keys.add(event.code);
-  if (event.code === "KeyR") resetMatch();
+  if (event.code === "KeyR" && state.multiplayerRole !== "guest") resetMatch();
   if (event.code === "KeyE") useAbility();
   if (event.code === "KeyX") useRoomCut();
   if (event.code === "KeyZ") useShambles();
@@ -478,6 +511,7 @@ canvas.addEventListener("pointerdown", handleCanvasPointer);
 
 resize();
 renderSettings();
+updateMultiplayerUi();
 renderShop();
 resetRound("Partida naval pronta. Mire no navio-gol vermelho.");
 renderer.setAnimationLoop(update);
@@ -495,6 +529,7 @@ function loadProgress() {
         items: normalizeSecretItems(saved.items),
         discovered: normalizeDiscovered(saved.discovered, inventory, unlocked),
         selectedSkin: SKINS[saved.selectedSkin] ? saved.selectedSkin : "classic",
+        aiDifficulty: AI_DIFFICULTIES[saved.aiDifficulty] ? saved.aiDifficulty : "medium",
         cameraZoom: Number.isFinite(saved.cameraZoom) ? THREE.MathUtils.clamp(saved.cameraZoom, 0, 2) : 0
       };
     }
@@ -502,7 +537,7 @@ function loadProgress() {
     console.warn("Nao foi possivel carregar progresso.", error);
   }
 
-  return { coins: 100, unlocked: ["classic"], inventory: {}, items: {}, discovered: {}, selectedSkin: "classic", cameraZoom: 0 };
+  return { coins: 100, unlocked: ["classic"], inventory: {}, items: {}, discovered: {}, selectedSkin: "classic", aiDifficulty: "medium", cameraZoom: 0 };
 }
 
 function saveProgress() {
@@ -701,6 +736,7 @@ function updateAdminPanel() {
 function renderSettings() {
   cameraZoomInput.value = progress.cameraZoom;
   cameraZoomValue.textContent = ["Normal", "Mais perto", "Bem perto"][progress.cameraZoom] || "Normal";
+  aiDifficultySelect.value = progress.aiDifficulty || "medium";
 }
 
 function initPreview() {
@@ -1233,7 +1269,7 @@ function openMenu() {
   renderShop();
 }
 
-function startMatch(wagerMode) {
+function startMatch(wagerMode, multiplayerRole = null) {
   if (wagerMode && progress.coins < 25) {
     state.message = "Voce precisa de 25 moedas para apostar.";
     renderShop();
@@ -1246,11 +1282,19 @@ function startMatch(wagerMode) {
   }
 
   state.wagerMode = wagerMode;
+  state.multiplayerRole = multiplayerRole;
   state.isPlaying = true;
   mainMenu.hidden = true;
   resetMatch();
+  if (multiplayerRole) {
+    state.message = multiplayerRole === "host"
+      ? "Sala multiplayer ativa. Voce controla o barco azul."
+      : "Sala multiplayer ativa. Voce controla o barco vermelho.";
+    renderShop();
+    return;
+  }
   state.message = wagerMode
-    ? "Aposta solo ativa: vença para ganhar bonus."
+    ? "Aposta solo ativa: venca para ganhar bonus."
     : "Partida solo ativa. Marque gols para ganhar moedas.";
   renderShop();
 }
@@ -2041,7 +2085,7 @@ function update() {
   const elapsed = clock.elapsedTime;
   const inCutscene = updateShamblesCutscene(dt, elapsed);
 
-  if (!inCutscene && state.isPlaying && state.timeLeft > 0 && state.justScored <= 0) {
+  if (!inCutscene && state.isPlaying && state.timeLeft > 0 && state.justScored <= 0 && state.multiplayerRole !== "guest") {
     state.timeLeft = Math.max(0, state.timeLeft - dt);
   }
 
@@ -2051,14 +2095,25 @@ function update() {
 
   updateOcean(elapsed);
   if (state.isPlaying && !inCutscene) {
-    updatePlayer(dt, elapsed);
-    updateAI(dt, elapsed);
-    updateCannonball(dt, elapsed);
-    resolveBoatCollision(player, ai);
-    resolveCannonballBoat(player, 1.22);
-    resolveCannonballBoat(ai, 0.96);
-    checkGoals();
-    checkMatchEnd();
+    if (state.multiplayerRole === "guest") {
+      sendMultiplayerInput(elapsed);
+      animateBoat(player, elapsed);
+      animateBoat(ai, elapsed + 0.7);
+    } else {
+      updatePlayer(dt, elapsed);
+      if (state.multiplayerRole === "host") {
+        updateRemoteBoat(dt, elapsed);
+      } else {
+        updateAI(dt, elapsed);
+      }
+      updateCannonball(dt, elapsed);
+      resolveBoatCollision(player, ai);
+      resolveCannonballBoat(player, 1.22);
+      resolveCannonballBoat(ai, 0.96);
+      checkGoals();
+      checkMatchEnd();
+      sendMultiplayerSnapshot(elapsed);
+    }
   } else {
     animateBoat(player, elapsed);
     animateBoat(ai, elapsed + 0.7);
@@ -2116,24 +2171,60 @@ function updatePlayer(dt, elapsed) {
 }
 
 function updateAI(dt, elapsed) {
+  const difficulty = AI_DIFFICULTIES[progress.aiDifficulty] || AI_DIFFICULTIES.medium;
   const velocity = ai.userData.velocity;
   const homeZ = -ARENA.depth / 2 + 9;
+  const predicted = cannonball.position.clone().addScaledVector(cannonball.userData.velocity, difficulty.prediction);
+  const errorX =
+    Math.sin(elapsed * 0.9 + ai.position.z * 0.07) * difficulty.error +
+    Math.cos(elapsed * 1.6) * difficulty.error * 0.35;
+  const shouldChase = predicted.z < difficulty.attackLine || cannonball.userData.velocity.z < -2.2;
   const target = tmp.set(
-    THREE.MathUtils.clamp(cannonball.position.x * 0.82, -ARENA.goalWidth * 0.55, ARENA.goalWidth * 0.55),
+    THREE.MathUtils.clamp(predicted.x + errorX, -ARENA.width / 2 + 5, ARENA.width / 2 - 5),
     ai.position.y,
-    cannonball.position.z < -4 ? cannonball.position.z + 3.2 : homeZ
+    shouldChase
+      ? predicted.z - 2.8 + difficulty.guardBias * 2.6
+      : THREE.MathUtils.lerp(predicted.z - 2.0, homeZ, difficulty.guardBias)
   );
-  target.z = THREE.MathUtils.clamp(target.z, -ARENA.depth / 2 + 5, 5);
+  target.z = THREE.MathUtils.clamp(target.z, -ARENA.depth / 2 + 5, 10);
 
-  steerBoatToward(ai, target, 1.85, dt);
-  velocity.multiplyScalar(Math.pow(0.22, dt));
-  clampLength(velocity, 13);
+  steerBoatToward(ai, target, difficulty.thrust, dt, difficulty.turnRate);
+  velocity.multiplyScalar(Math.pow(difficulty.damping, dt));
+  clampLength(velocity, difficulty.maxSpeed);
   ai.position.addScaledVector(velocity, dt);
   clampBoatToArena(ai);
   animateBoat(ai, elapsed + 0.7);
 }
 
-function steerBoatToward(boat, target, thrust, dt) {
+function updateRemoteBoat(dt, elapsed) {
+  ai.userData.remoteBoostCooldown = Math.max(0, (ai.userData.remoteBoostCooldown || 0) - dt);
+  const input = multiplayer.remoteInput;
+  const velocity = ai.userData.velocity;
+  const speedFactor = THREE.MathUtils.clamp(velocity.length() / 7, 0.38, 1.3);
+
+  ai.userData.heading -= input.turn * dt * 2.25 * speedFactor;
+
+  if (input.throttle !== 0) {
+    const forward = getForward(ai);
+    velocity.addScaledVector(forward, input.throttle * 15.5 * dt);
+    emitWake(ai.position, forward.clone().multiplyScalar(-1), input.throttle > 0 ? materials.wake : materials.foam);
+  }
+
+  if (input.boost && ai.userData.remoteBoostCooldown <= 0) {
+    const forward = getForward(ai);
+    velocity.addScaledVector(forward, 12.5);
+    ai.userData.remoteBoostCooldown = 1.55;
+    splash(ai.position, materials.foam);
+  }
+
+  velocity.multiplyScalar(Math.pow(0.18, dt));
+  clampLength(velocity, 17);
+  ai.position.addScaledVector(velocity, dt);
+  clampBoatToArena(ai);
+  animateBoat(ai, elapsed + 0.7);
+}
+
+function steerBoatToward(boat, target, thrust, dt, turnRate = 2.1) {
   const toTarget = target.clone().sub(boat.position);
   toTarget.y = 0;
 
@@ -2141,7 +2232,7 @@ function steerBoatToward(boat, target, thrust, dt) {
 
   const desired = Math.atan2(toTarget.x, toTarget.z);
   const delta = angleDelta(boat.userData.heading, desired);
-  boat.userData.heading += THREE.MathUtils.clamp(delta, -dt * 2.1, dt * 2.1);
+  boat.userData.heading += THREE.MathUtils.clamp(delta, -dt * turnRate, dt * turnRate);
 
   const forward = getForward(boat);
   const alignment = THREE.MathUtils.clamp(forward.dot(toTarget.normalize()), -0.25, 1);
@@ -2264,18 +2355,262 @@ function resetRound(message) {
   applySkinToBoat(player, progress.selectedSkin);
 }
 
+function setMultiplayerStatus(message) {
+  multiplayerStatus.textContent = message;
+}
+
+function updateMultiplayerUi() {
+  const hasRoom = Boolean(multiplayer.roomCode);
+  createRoomButton.disabled = multiplayer.connected && hasRoom;
+  joinRoomButton.disabled = multiplayer.connected && hasRoom;
+  roomCodeInput.disabled = multiplayer.connected && hasRoom;
+  leaveRoomButton.hidden = !hasRoom;
+}
+
+function getMultiplayerServerUrl() {
+  const value = multiplayerServerUrl.value.trim();
+  if (!value) {
+    setMultiplayerStatus("Digite a URL do servidor WebSocket para criar salas.");
+    return "";
+  }
+
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "ws:" && url.protocol !== "wss:") {
+      setMultiplayerStatus("Use uma URL ws:// ou wss:// para o servidor.");
+      return "";
+    }
+    return url.toString();
+  } catch {
+    setMultiplayerStatus("URL do servidor invalida.");
+    return "";
+  }
+}
+
+function connectMultiplayerServer() {
+  if (multiplayer.socket?.readyState === WebSocket.OPEN) return Promise.resolve(multiplayer.socket);
+
+  const url = getMultiplayerServerUrl();
+  if (!url) return Promise.reject(new Error("missing-url"));
+
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket(url);
+    multiplayer.socket = socket;
+    setMultiplayerStatus("Conectando ao servidor...");
+
+    socket.addEventListener("open", () => {
+      multiplayer.connected = true;
+      updateMultiplayerUi();
+      resolve(socket);
+    });
+
+    socket.addEventListener("message", (event) => {
+      try {
+        handleMultiplayerMessage(JSON.parse(event.data));
+      } catch {
+        setMultiplayerStatus("Mensagem invalida recebida do servidor.");
+      }
+    });
+
+    socket.addEventListener("close", () => {
+      multiplayer.connected = false;
+      multiplayer.socket = null;
+      multiplayer.roomCode = "";
+      multiplayer.role = null;
+      multiplayer.remoteInput = { turn: 0, throttle: 0, boost: false };
+      state.multiplayerRole = null;
+      updateMultiplayerUi();
+      setMultiplayerStatus("Conexao multiplayer fechada.");
+    });
+
+    socket.addEventListener("error", () => {
+      setMultiplayerStatus("Nao consegui conectar no servidor.");
+      reject(new Error("socket-error"));
+    });
+  });
+}
+
+async function createMultiplayerRoom() {
+  try {
+    const socket = await connectMultiplayerServer();
+    socket.send(JSON.stringify({ type: "createRoom" }));
+  } catch {
+    updateMultiplayerUi();
+  }
+}
+
+async function joinMultiplayerRoom() {
+  const roomCode = roomCodeInput.value.trim().toUpperCase();
+  if (!roomCode) {
+    setMultiplayerStatus("Digite o codigo da sala para entrar.");
+    return;
+  }
+
+  try {
+    const socket = await connectMultiplayerServer();
+    socket.send(JSON.stringify({ type: "joinRoom", roomCode }));
+  } catch {
+    updateMultiplayerUi();
+  }
+}
+
+function leaveMultiplayerRoom(message = "Voce saiu da sala.") {
+  if (multiplayer.socket?.readyState === WebSocket.OPEN) {
+    multiplayer.socket.send(JSON.stringify({ type: "leaveRoom" }));
+    multiplayer.socket.close();
+  }
+
+  multiplayer.connected = false;
+  multiplayer.socket = null;
+  multiplayer.roomCode = "";
+  multiplayer.role = null;
+  multiplayer.remoteInput = { turn: 0, throttle: 0, boost: false };
+  state.multiplayerRole = null;
+  setMultiplayerStatus(message);
+  updateMultiplayerUi();
+}
+
+function sendMultiplayerRelay(message) {
+  if (multiplayer.socket?.readyState !== WebSocket.OPEN || !multiplayer.roomCode) return;
+  multiplayer.socket.send(JSON.stringify({ type: "relay", roomCode: multiplayer.roomCode, message }));
+}
+
+function handleMultiplayerMessage(data) {
+  if (data.type === "roomCreated") {
+    multiplayer.roomCode = data.roomCode;
+    multiplayer.role = "host";
+    roomCodeInput.value = data.roomCode;
+    updateMultiplayerUi();
+    setMultiplayerStatus(`Sala ${data.roomCode} criada. Esperando outro jogador.`);
+    return;
+  }
+
+  if (data.type === "roomJoined") {
+    multiplayer.roomCode = data.roomCode;
+    multiplayer.role = data.role;
+    roomCodeInput.value = data.roomCode;
+    updateMultiplayerUi();
+    setMultiplayerStatus(data.role === "host" ? `Sala ${data.roomCode} pronta.` : `Voce entrou na sala ${data.roomCode}.`);
+    return;
+  }
+
+  if (data.type === "peerJoined") {
+    setMultiplayerStatus("Outro jogador entrou. Iniciando partida.");
+    if (multiplayer.role === "host") {
+      startMatch(false, "host");
+      sendMultiplayerRelay({ type: "start" });
+    }
+    return;
+  }
+
+  if (data.type === "peerLeft") {
+    multiplayer.remoteInput = { turn: 0, throttle: 0, boost: false };
+    state.message = "O outro jogador saiu da sala.";
+    setMultiplayerStatus("O outro jogador saiu da sala.");
+    return;
+  }
+
+  if (data.type === "relay") {
+    handleMultiplayerRelay(data.message);
+    return;
+  }
+
+  if (data.type === "error") {
+    setMultiplayerStatus(data.message || "Erro no servidor multiplayer.");
+  }
+}
+
+function handleMultiplayerRelay(message) {
+  if (message.type === "start" && multiplayer.role === "guest") {
+    startMatch(false, "guest");
+    return;
+  }
+
+  if (message.type === "input" && multiplayer.role === "host") {
+    multiplayer.remoteInput = {
+      turn: THREE.MathUtils.clamp(Number(message.input?.turn) || 0, -1, 1),
+      throttle: THREE.MathUtils.clamp(Number(message.input?.throttle) || 0, -1, 1),
+      boost: Boolean(message.input?.boost)
+    };
+    return;
+  }
+
+  if (message.type === "snapshot" && multiplayer.role === "guest") {
+    applyMultiplayerSnapshot(message.snapshot);
+  }
+}
+
+function getLocalInputState() {
+  return {
+    turn: Number(keys.has("KeyD") || keys.has("ArrowRight")) - Number(keys.has("KeyA") || keys.has("ArrowLeft")),
+    throttle: Number(keys.has("KeyW") || keys.has("ArrowUp")) - Number(keys.has("KeyS") || keys.has("ArrowDown")),
+    boost: keys.has("Space")
+  };
+}
+
+function sendMultiplayerInput(elapsed) {
+  if (multiplayer.role !== "guest" || elapsed - multiplayer.lastInputSent < 0.045) return;
+  multiplayer.lastInputSent = elapsed;
+  sendMultiplayerRelay({ type: "input", input: getLocalInputState() });
+}
+
+function serializeTransform(object) {
+  return {
+    p: [object.position.x, object.position.y, object.position.z],
+    v: [object.userData.velocity.x, object.userData.velocity.y, object.userData.velocity.z],
+    h: object.userData.heading || 0
+  };
+}
+
+function applyTransform(object, transform) {
+  if (!transform) return;
+  object.position.set(transform.p[0], transform.p[1], transform.p[2]);
+  object.userData.velocity.set(transform.v[0], transform.v[1], transform.v[2]);
+  object.userData.heading = transform.h;
+}
+
+function sendMultiplayerSnapshot(elapsed) {
+  if (multiplayer.role !== "host" || elapsed - multiplayer.lastSnapshotSent < 0.05) return;
+  multiplayer.lastSnapshotSent = elapsed;
+  sendMultiplayerRelay({
+    type: "snapshot",
+    snapshot: {
+      player: serializeTransform(player),
+      ai: serializeTransform(ai),
+      cannonball: serializeTransform(cannonball),
+      score: [state.playerScore, state.aiScore],
+      timeLeft: state.timeLeft,
+      justScored: state.justScored,
+      message: state.message
+    }
+  });
+}
+
+function applyMultiplayerSnapshot(snapshot) {
+  if (!snapshot) return;
+  applyTransform(player, snapshot.player);
+  applyTransform(ai, snapshot.ai);
+  applyTransform(cannonball, snapshot.cannonball);
+  state.playerScore = snapshot.score?.[0] ?? state.playerScore;
+  state.aiScore = snapshot.score?.[1] ?? state.aiScore;
+  state.timeLeft = snapshot.timeLeft ?? state.timeLeft;
+  state.justScored = snapshot.justScored ?? state.justScored;
+  state.message = snapshot.message || state.message;
+}
+
 function updateCamera(dt) {
   const zoom = progress.cameraZoom || 0;
+  const focusBoat = state.multiplayerRole === "guest" ? ai : player;
   const target = new THREE.Vector3(
-    player.position.x * 0.38 + cannonball.position.x * 0.28,
+    focusBoat.position.x * 0.38 + cannonball.position.x * 0.28,
     47 - zoom * 6,
-    player.position.z + 72 - zoom * 12
+    focusBoat.position.z + (state.multiplayerRole === "guest" ? -72 + zoom * 12 : 72 - zoom * 12)
   );
   camera.position.lerp(target, 1 - Math.pow(0.001, dt));
   camera.lookAt(
-    player.position.x * 0.45 + cannonball.position.x * 0.35,
+    focusBoat.position.x * 0.45 + cannonball.position.x * 0.35,
     1.3,
-    player.position.z * 0.58 + cannonball.position.z * 0.42
+    focusBoat.position.z * 0.58 + cannonball.position.z * 0.42
   );
 }
 

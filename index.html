@@ -67,6 +67,37 @@
                 </button>
               </div>
 
+              <div class="difficulty-panel" aria-label="Dificuldade do inimigo">
+                <label for="aiDifficulty">
+                  <span>Dificuldade do computador</span>
+                  <select id="aiDifficulty">
+                    <option value="easy">Facil</option>
+                    <option value="medium">Medio</option>
+                    <option value="hard">Dificil</option>
+                    <option value="impossible">Impossivel</option>
+                    <option value="einstein">Albert Einstein</option>
+                  </select>
+                </label>
+              </div>
+
+              <div class="multiplayer-panel" aria-label="Multiplayer online">
+                <div class="multiplayer-head">
+                  <span>Multiplayer</span>
+                  <strong>Salas online</strong>
+                </div>
+                <label for="multiplayerServerUrl">
+                  <span>Servidor WebSocket</span>
+                  <input id="multiplayerServerUrl" type="url" placeholder="wss://seu-servidor.com" />
+                </label>
+                <div class="room-actions">
+                  <button id="createRoomButton" type="button">Criar sala</button>
+                  <input id="roomCodeInput" type="text" maxlength="6" placeholder="Codigo" />
+                  <button id="joinRoomButton" type="button">Entrar</button>
+                  <button id="leaveRoomButton" type="button" hidden>Sair</button>
+                </div>
+                <span id="multiplayerStatus">GitHub Pages precisa de um servidor externo para salas.</span>
+              </div>
+
               <div class="settings-panel" aria-label="Configuracoes do jogo">
                 <label for="cameraZoom">
                   <span>Zoom da camera</span>

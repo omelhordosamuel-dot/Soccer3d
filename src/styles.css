@@ -277,6 +277,8 @@ h3 {
 }
 
 .settings-panel,
+.difficulty-panel,
+.multiplayer-panel,
 .reward-box,
 .admin-panel,
 .craft-card,
@@ -293,7 +295,17 @@ h3 {
   padding: 14px;
 }
 
+.difficulty-panel,
+.multiplayer-panel {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 14px;
+}
+
 .settings-panel label,
+.difficulty-panel label,
+.multiplayer-panel label,
 .preview-zoom {
   display: grid;
   gap: 8px;
@@ -304,8 +316,65 @@ h3 {
   color: #dff5ff;
 }
 
+.difficulty-panel label,
+.multiplayer-panel label {
+  color: #dff5ff;
+}
+
 .settings-panel strong {
   color: #ffd65e;
+}
+
+.difficulty-panel select,
+.multiplayer-panel input {
+  width: 100%;
+  height: 40px;
+  border: 1px solid rgba(232, 246, 255, 0.18);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.09);
+  color: #f6fbff;
+  padding: 0 10px;
+}
+
+.multiplayer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.multiplayer-head span,
+.difficulty-panel span,
+.multiplayer-panel label span {
+  color: #9cc6ce;
+  font-size: 12px;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.multiplayer-head strong {
+  color: #ffffff;
+}
+
+.room-actions {
+  display: grid;
+  grid-template-columns: auto minmax(88px, 1fr) auto auto;
+  gap: 8px;
+}
+
+.room-actions button {
+  min-height: 40px;
+  border: 1px solid rgba(255, 220, 120, 0.36);
+  background: #ffd65e;
+  color: #1d1908;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+#multiplayerStatus {
+  color: #c6e2e8;
+  font-size: 13px;
+  line-height: 1.35;
 }
 
 input[type="range"] {
@@ -913,6 +982,10 @@ kbd {
   }
 
   .settings-panel label {
+    grid-template-columns: 1fr;
+  }
+
+  .room-actions {
     grid-template-columns: 1fr;
   }
 

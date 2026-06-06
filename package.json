@@ -4,6 +4,10 @@
   "private": true,
   "description": "Prototipo web de futebol naval 3D com barcos e bolas de canhao.",
   "scripts": {
-    "start": "node dev-server.js"
+    "start": "node dev-server.js",
+    "server": "node multiplayer-server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
   }
 }
