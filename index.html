@@ -97,21 +97,32 @@
               </div>
 
               <div class="admin-panel" id="adminPanel" hidden>
-                <label>
-                  Senha secreta
-                  <input id="adminPassword" type="password" inputmode="numeric" autocomplete="off" />
-                </label>
-                <label>
-                  Quantidade para dar
-                  <input id="adminGiveAmount" type="number" min="1" max="99" value="3" />
-                </label>
-                <div class="admin-actions">
-                  <button id="adminUnlockAllButton" type="button">Liberar todos</button>
-                  <button id="adminCoinsButton" type="button">+1000 moedas</button>
-                  <button id="adminResetCharactersButton" type="button">Zerar personagens</button>
+                <div class="admin-login">
+                  <label>
+                    Senha secreta
+                    <input id="adminPassword" type="password" inputmode="numeric" autocomplete="off" />
+                  </label>
+                  <span id="adminStatus"></span>
                 </div>
-                <div class="admin-skins" id="adminSkinButtons"></div>
-                <span id="adminStatus"></span>
+
+                <div class="admin-locked" id="adminLocked">
+                  <span>Bloqueado</span>
+                </div>
+
+                <div class="admin-tools" id="adminTools" hidden>
+                  <div class="admin-toolbar">
+                    <label>
+                      Quantidade
+                      <input id="adminGiveAmount" type="number" min="1" max="99" value="3" />
+                    </label>
+                    <div class="admin-actions">
+                      <button id="adminUnlockAllButton" type="button">Liberar todos</button>
+                      <button id="adminCoinsButton" type="button">+1000 moedas</button>
+                      <button id="adminResetCharactersButton" type="button">Zerar personagens</button>
+                    </div>
+                  </div>
+                  <div class="admin-skins" id="adminSkinButtons"></div>
+                </div>
               </div>
             </section>
 

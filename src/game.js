@@ -38,6 +38,8 @@ const activeSkinNameEl = document.querySelector("#activeSkinName");
 const adminOpenButton = document.querySelector("#adminOpenButton");
 const adminPanel = document.querySelector("#adminPanel");
 const adminPassword = document.querySelector("#adminPassword");
+const adminLocked = document.querySelector("#adminLocked");
+const adminTools = document.querySelector("#adminTools");
 const adminUnlockAllButton = document.querySelector("#adminUnlockAllButton");
 const adminCoinsButton = document.querySelector("#adminCoinsButton");
 const adminResetCharactersButton = document.querySelector("#adminResetCharactersButton");
@@ -201,6 +203,7 @@ let activeAbility = null;
 let shamblesTargeting = null;
 let shamblesCutscene = null;
 let lastShamblesKeyTime = 0;
+let adminUnlocked = false;
 const forbiddenCraft = {
   slots: Array(9).fill(null)
 };
@@ -390,6 +393,17 @@ forbiddenCraftTrigger.addEventListener("keydown", (event) => {
 backToCraftingButton.addEventListener("click", () => setMenuTab("crafting"));
 adminOpenButton.addEventListener("click", () => {
   adminPanel.hidden = !adminPanel.hidden;
+  if (!adminPanel.hidden) {
+    adminUnlocked = false;
+    adminPassword.value = "";
+    adminStatus.textContent = "";
+    updateAdminPanel();
+  }
+});
+adminPassword.addEventListener("input", () => {
+  adminUnlocked = adminPassword.value === "1234";
+  adminStatus.textContent = adminPassword.value && !adminUnlocked ? "Senha incorreta." : "";
+  updateAdminPanel();
 });
 adminUnlockAllButton.addEventListener("click", () => runAdminAction(() => {
   progress.unlocked = Object.keys(SKINS);
@@ -579,7 +593,7 @@ function renderShop() {
     const owned = ownsSkin(skinId);
     const equipped = progress.selectedSkin === skinId;
     if (!owned) {
-      renderAdminSkinButton(skinId, skin);
+      if (adminUnlocked) renderAdminSkinButton(skinId, skin);
       continue;
     }
     visibleCount += 1;
@@ -639,7 +653,7 @@ function renderShop() {
     card.append(action);
     shopGrid.append(card);
 
-    renderAdminSkinButton(skinId, skin);
+    if (adminUnlocked) renderAdminSkinButton(skinId, skin);
   }
 
   if (visibleCount <= 1) {
@@ -650,6 +664,7 @@ function renderShop() {
   }
 
   renderCrafting();
+  updateAdminPanel();
 }
 
 function renderAdminSkinButton(skinId, skin) {
@@ -670,6 +685,17 @@ function renderAdminSkinButton(skinId, skin) {
     return `${amount}x ${skin.name} adicionados/equipados para teste.`;
   }));
   adminSkinButtons.append(adminSkinButton);
+}
+
+function updateAdminPanel() {
+  if (!adminLocked || !adminTools) return;
+  adminLocked.hidden = adminUnlocked;
+  adminTools.hidden = !adminUnlocked;
+  if (adminUnlocked && adminSkinButtons.children.length === 0) {
+    for (const [skinId, skin] of Object.entries(SKINS)) {
+      renderAdminSkinButton(skinId, skin);
+    }
+  }
 }
 
 function renderSettings() {
@@ -1191,7 +1217,7 @@ function rollRewardBox() {
 }
 
 function runAdminAction(action) {
-  if (adminPassword.value !== "1234") {
+  if (!adminUnlocked) {
     adminStatus.textContent = "Senha incorreta.";
     return;
   }

@@ -595,13 +595,47 @@ input[type="range"] {
 
 .admin-panel {
   display: grid;
-  gap: 10px;
+  gap: 12px;
   margin-top: 12px;
   padding: 14px;
 }
 
 .admin-panel[hidden] {
   display: none;
+}
+
+.admin-login,
+.admin-toolbar {
+  display: grid;
+  gap: 12px;
+}
+
+.admin-login {
+  grid-template-columns: minmax(220px, 290px) 1fr;
+  align-items: end;
+}
+
+.admin-tools {
+  display: grid;
+  gap: 12px;
+}
+
+.admin-tools[hidden],
+.admin-locked[hidden] {
+  display: none;
+}
+
+.admin-locked {
+  display: grid;
+  min-height: 78px;
+  place-items: center;
+  border: 1px dashed rgba(232, 246, 255, 0.18);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+  color: #9cc6ce;
+  font-size: 13px;
+  font-weight: 850;
+  text-transform: uppercase;
 }
 
 .admin-panel label {
@@ -625,6 +659,11 @@ input[type="range"] {
   max-width: 120px;
 }
 
+.admin-toolbar {
+  grid-template-columns: 126px minmax(0, 1fr);
+  align-items: end;
+}
+
 .admin-actions,
 .admin-skins {
   display: flex;
@@ -632,10 +671,20 @@ input[type="range"] {
   gap: 8px;
 }
 
+.admin-skins {
+  padding-top: 10px;
+  border-top: 1px solid rgba(232, 246, 255, 0.12);
+}
+
 .admin-actions button,
 .admin-skins button {
-  min-width: 132px;
+  min-width: 126px;
   padding: 0 12px;
+}
+
+.admin-skins button {
+  min-height: 36px;
+  font-size: 13px;
 }
 
 .preview-panel {
@@ -864,6 +913,11 @@ kbd {
   }
 
   .settings-panel label {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-login,
+  .admin-toolbar {
     grid-template-columns: 1fr;
   }
 
